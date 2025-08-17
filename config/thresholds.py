@@ -132,6 +132,22 @@ ORGANIZATION_INFO = {
 }
 
 # =============================================================================
+# 🆕 피드백 시스템 설정
+# =============================================================================
+
+FEEDBACK_SETTINGS = {
+    "enable_feedback": True,                    # 피드백 기능 활성화 여부
+    "require_reason_for_negative": False,       # 부정 피드백시 사유 입력 필수 여부
+    "admin_dashboard_cache_hours": 24,          # 관리자 대시보드 캐시 시간 (시간)
+    "max_recent_feedbacks": 50,                 # 최근 피드백 표시 최대 개수
+    "feedback_button_help_positive": "도움이 되었습니다",      # 👍 버튼 도움말
+    "feedback_button_help_negative": "개선이 필요합니다",      # 👎 버튼 도움말
+    "feedback_thank_you_message": "피드백 감사합니다! 🙏",     # 피드백 완료 메시지
+    "feedback_error_message": "일시적 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",  # 에러 메시지
+    "admin_password_default": "byeoli2024"      # 기본 관리자 비밀번호
+}
+
+# =============================================================================
 # 설정 검증 함수
 # =============================================================================
 
@@ -160,6 +176,33 @@ def validate_thresholds():
     # 공통 임계값 순서 검증
     if COMMON_THRESHOLDS["casual_chat"] >= COMMON_THRESHOLDS["insufficient_info"]:
         errors.append(f"casual_chat({COMMON_THRESHOLDS['casual_chat']})는 insufficient_info({COMMON_THRESHOLDS['insufficient_info']})보다 낮아야 함")
+    
+    return errors
+
+def validate_feedback_settings():
+    """
+    🆕 피드백 시스템 설정 검증
+    """
+    errors = []
+    
+    # 캐시 시간 검증 (1시간 ~ 7일)
+    cache_hours = FEEDBACK_SETTINGS.get("admin_dashboard_cache_hours", 24)
+    if not (1 <= cache_hours <= 168):  # 1시간 ~ 7일
+        errors.append(f"admin_dashboard_cache_hours = {cache_hours}는 1~168 범위를 벗어남")
+    
+    # 최대 피드백 개수 검증 (10개 ~ 1000개)
+    max_feedbacks = FEEDBACK_SETTINGS.get("max_recent_feedbacks", 50)
+    if not (10 <= max_feedbacks <= 1000):
+        errors.append(f"max_recent_feedbacks = {max_feedbacks}는 10~1000 범위를 벗어남")
+    
+    # 필수 설정값 존재 여부 확인
+    required_keys = [
+        "enable_feedback", "require_reason_for_negative", 
+        "feedback_thank_you_message", "feedback_error_message"
+    ]
+    for key in required_keys:
+        if key not in FEEDBACK_SETTINGS:
+            errors.append(f"필수 피드백 설정 누락: {key}")
     
     return errors
 
@@ -195,10 +238,13 @@ if __name__ == "__main__":
     
     # 설정값 유효성 검증
     validation_errors = validate_thresholds()
+    feedback_errors = validate_feedback_settings()
     
-    if validation_errors:
+    all_errors = validation_errors + feedback_errors
+    
+    if all_errors:
         print("❌ 설정값 오류 발견:")
-        for error in validation_errors:
+        for error in all_errors:
             print(f"  - {error}")
     else:
         print("✅ 모든 설정값이 유효합니다.")
@@ -216,3 +262,9 @@ if __name__ == "__main__":
     print(f"기관명: {ORGANIZATION_INFO['name']}")
     print(f"웹사이트: {ORGANIZATION_INFO['website']}")
     print(f"대표번호: {ORGANIZATION_INFO['main_phone']}")
+    
+    print(f"\n=== 🆕 피드백 시스템 설정 ===")
+    print(f"피드백 활성화: {FEEDBACK_SETTINGS['enable_feedback']}")
+    print(f"사유 입력 필수: {FEEDBACK_SETTINGS['require_reason_for_negative']}")
+    print(f"캐시 시간: {FEEDBACK_SETTINGS['admin_dashboard_cache_hours']}시간")
+    print(f"최대 표시 개수: {FEEDBACK_SETTINGS['max_recent_feedbacks']}개")
