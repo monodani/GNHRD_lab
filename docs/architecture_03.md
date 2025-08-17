@@ -249,18 +249,18 @@ sequenceDiagram
 ```python
 # 공통 기준선 (모든 핸들러 공통)
 COMMON_THRESHOLDS = {
-    "casual_chat": 0.20,        # 0.0 ~ 0.20: 일상 대화
-    "insufficient_info": 0.50   # 0.20초과 ~ 0.50: 정보 부족
+    "casual_chat": 0.15,        # 0.0 ~ 0.15: 일상 대화 (기존 0.20 → 0.15)
+    "insufficient_info": 0.35   # 0.15초과 ~ 0.35: 정보 부족 (기존 0.50 → 0.35)
 }
 
 # 핸들러별 개별 기준 (도메인 특성 반영)
 HANDLER_THRESHOLDS = {
-    "satisfaction": 0.70,  # 0.50초과~0.70: 되묻기, 0.70초과~1.0: 정상답변
-    "general": 0.65,       # 0.50초과~0.65: 되묻기, 0.65초과~1.0: 정상답변
-    "cyber": 0.75,         # 0.50초과~0.75: 되묻기, 0.75초과~1.0: 정상답변
-    "menu": 0.60,          # 0.50초과~0.60: 되묻기, 0.60초과~1.0: 정상답변
-    "notice": 0.65,        # 0.50초과~0.65: 되묻기, 0.65초과~1.0: 정상답변
-    "publish": 0.70        # 0.50초과~0.70: 되묻기, 0.70초과~1.0: 정상답변
+    "satisfaction": 0.45,  # 0.35초과~0.45: 되묻기, 0.45초과~1.0: 정상답변
+    "general": 0.42,       # 0.35초과~0.42: 되묻기, 0.42초과~1.0: 정상답변
+    "cyber": 0.48,         # 0.35초과~0.48: 되묻기, 0.48초과~1.0: 정상답변
+    "menu": 0.40,          # 0.35초과~0.40: 되묻기, 0.40초과~1.0: 정상답변
+    "notice": 0.42,        # 0.35초과~0.42: 되묻기, 0.42초과~1.0: 정상답변
+    "publish": 0.45        # 0.35초과~0.45: 되묻기, 0.45초과~1.0: 정상답변
 }
 ```
 
@@ -608,37 +608,52 @@ class BaseHandler:
 ```python
 class SatisfactionHandler:
     def __init__(self):
-        self.threshold = HANDLER_THRESHOLDS["satisfaction"]  # 0.70
+        self.threshold = HANDLER_THRESHOLDS["satisfaction"]  # 0.45
     
     def search_chunks(self, query: str) -> List[ChunkResult]:
-        # 1. FAISS 검색
+        # 1. FAISS 검색 (절대적 유사도와 함께)
         vectorstore = self.index_manager.get_vectorstore("satisfaction")
-        search_results = vectorstore.as_retriever(k=5).invoke(query)
+        docs_with_scores = vectorstore.similarity_search_with_score(query, k=5)
         
-        # 2. Confidence 계산 및 ChunkResult 변환
+        # 2. 절대적 유사도 기반 Confidence 계산
         chunk_results = []
-        for i, doc in enumerate(search_results):
-            confidence = self._calculate_confidence(doc, query, i)
+        for i, (doc, distance_score) in enumerate(docs_with_scores):
+            # 절대적 유사도 계산
+            similarity = self._distance_to_similarity(distance_score)
+            
+            # 순위 기반 미세 조정 (최대 10% 영향)
+            rank_penalty = i * 0.02  # 1등: 0, 2등: -0.02, 3등: -0.04
+            confidence = similarity - rank_penalty
+            confidence = max(0.0, min(1.0, confidence))
             
             chunk_results.append(ChunkResult(
                 chunk=TextChunk(doc.page_content, doc.metadata),
-                confidence=confidence,
+                confidence=confidence,  # 절대적 점수
                 domain="satisfaction",
                 metadata={
                     "source_file": doc.metadata.get("source"),
                     "department": "인재개발지원과 평가분석담당",
                     "contact": "055-254-2021",
-                    "rank": i + 1
+                    "rank": i + 1,
+                    "distance_score": distance_score,
+                    "similarity_score": similarity
                 }
             ))
         
         # 3. 상위 3개만 반환
         return chunk_results[:3]
     
-    def _calculate_confidence(self, doc, query, rank):
-        """순서 기반 confidence 계산"""
-        base_confidence = 1.0 - (rank * 0.1)  # 1.0, 0.9, 0.8, 0.7, 0.6
-        return max(0.1, base_confidence)
+    def _distance_to_similarity(self, distance: float) -> float:
+        """FAISS 거리를 유사도로 변환"""
+        similarity = 1.0 / (1.0 + distance)
+        
+        # 추가 정규화
+        if distance <= 0.1:  # 매우 유사
+            similarity = max(0.9, similarity)
+        elif distance >= 2.0:  # 매우 다름
+            similarity = min(0.3, similarity)
+        
+        return max(0.0, min(1.0, similarity))
 ```
 
 ## 피드백 시스템 아키텍처 (🆕 추가)
