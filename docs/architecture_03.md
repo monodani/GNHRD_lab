@@ -1310,7 +1310,7 @@ datetime
 # Firestore 서비스 계정 JSON (전체 내용)
 {
   "type": "service_account",
-  "project_id": "byeoli-feedback",
+  "project_id": "Byeoli-GNHRD-feedback",
   "private_key_id": "...",
   "private_key": "...",
   "client_email": "...",
