@@ -547,18 +547,33 @@ class FeedbackManager:
             self._log_error("recent_feedbacks_query_failed", str(e))
             return []
     
-    def _log_error(self, error_type: str, error_message: str):
-        """에러 로그를 Firestore에 저장"""
+    def _log_error(self, error_type: str, error_message: str, session_id: str = None) -> None:
+        """
+        에러 로그를 Firestore에 저장
+
+        Args:
+            error_type: 에러 타입
+            error_message: 에러 메시지
+            session_id: 세션 ID (선택사항)
+        """
+        if not self.is_firestore_available:
+            logger.error(f"에러 로그 저장 불가 - {error_type}: {error_message}")
+            return
+
         try:
             error_data = {
                 'error_type': error_type,
                 'error_message': error_message,
-                'timestamp': datetime.now(),
-                'session_id': st.session_state.get('session_id', 'unknown')
+                'timestamp': datetime.now(KST),
+                'session_id': session_id or st.session_state.get('session_id', 'unknown')
             }
-            self.db.collection('error_logs').add(error_data)
+
+            self.db.collection(self.config['collection_errors']).add(error_data)
+            logger.info(f"에러 로그 저장 완료: {error_type}")
+
         except Exception as e:
             logger.error(f"에러 로그 저장 실패: {e}")
+
 ```
 
 ### base_handler.py (CentralOrchestrator)
@@ -1175,7 +1190,7 @@ streamlit_app/
 
 ### ⚡ **성능 최적화**
 - **병렬 검색**: 6개 핸들러 동시 실행
-- **백그라운드 요약**: Threading으로 응답 지연 없음
+- **백그라운드 요약**: ThreadPoolExecutor로 응답 지연 없음
 - **실시간 스트리밍**: 첫 토큰 1.5초 이내 출력
 - **24시간 캐시**: 관리자 대시보드 성능 최적화
 
@@ -1331,10 +1346,10 @@ datetime
 
 ### **코드 구현 완료 항목**
 - [x] `config/thresholds.py` ✅ 완료
-- [ ] `config/config.py` 수정 (conversation_manager + 피드백 설정)
-- [ ] `utils/contracts.py` 수정 (FeedbackData 클래스 추가)
-- [ ] `utils/conversation_manager.py` 수정 (message_id 추가)
-- [ ] `utils/feedback_manager.py` 신규 생성
+- [x] `config/config.py` ✅ 완료 (conversation_manager + 피드백 설정)
+- [x] `utils/contracts.py` ✅ 완료 (FeedbackData 클래스 추가)
+- [x] `utils/conversation_manager.py` ✅ 완료 (message_id 추가)
+- [x] `utils/feedback_manager.py` ✅ 완료
 - [ ] `handlers/base_handler.py` 수정 (message_id 반환)
 - [ ] `app.py` 대폭 수정 (피드백 UI + 관리자 대시보드)
 - [ ] `assets/byeoli.png` 추가
