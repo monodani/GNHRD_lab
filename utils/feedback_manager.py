@@ -127,13 +127,13 @@ class FeedbackManager:
     def save_feedback(self, feedback_data: FeedbackData) -> bool:
         """
         피드백 데이터 저장
-        
+
         Args:
             feedback_data: 저장할 피드백 데이터
-            
+
         Returns:
             bool: 저장 성공 여부
-            
+
         처리 순서:
         1. 백업된 피드백들 먼저 재시도
         2. 현재 피드백 저장 시도
@@ -143,37 +143,28 @@ class FeedbackManager:
             logger.warning("Firestore를 사용할 수 없어 피드백을 백업합니다.")
             self._backup_to_session_state(feedback_data)
             return False
-        
+
         try:
             # 1. 백업된 피드백들 먼저 재시도
             self._retry_pending_feedbacks()
-            
+
             # 2. 현재 피드백 저장 시도
             feedback_dict = feedback_data.to_dict()
-            
+
             # 한국 시간으로 타임스탬프 설정
             feedback_dict['timestamp'] = datetime.now(KST)
-            
+
             # Firestore에 저장 (자동 문서 ID)
             doc_ref = self.db.collection(self.config['collection_feedbacks']).add(feedback_dict)
-            
+
             logger.info(f"피드백 저장 성공: {doc_ref[1].id}")
             return True
-            
-        except DeadlineExceeded:
-            logger.warning("Firestore 타임아웃 - 백업 저장")
-            self._backup_to_session_state(feedback_data)
-            return False
-            
-        except GoogleAPIError as e:
-            logger.error(f"Firestore API 에러: {e}")
-            self._backup_to_session_state(feedback_data)
-            return False
-            
+
         except Exception as e:
             logger.error(f"피드백 저장 실패: {e}")
             self._backup_to_session_state(feedback_data)
             return False
+
     
     def _backup_to_session_state(self, feedback_data: FeedbackData) -> None:
         """
