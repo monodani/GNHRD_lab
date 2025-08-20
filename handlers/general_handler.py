@@ -1,237 +1,286 @@
-#!/usr/bin/env python3
+# handlers/general_handler.py
 """
-경상남도인재개발원 RAG 챗봇 - general_handler
+벼리톡@경상남도인재개발원(BYEOLI-TALK@GNHRD) - 일반 정보 핸들러 v4.0
+Architecture.md 기반 검색 전용 핸들러
 
-일반 도메인 전용 핸들러: 학칙, 전결규정, 운영원칙, 업무담당자 연락처 통합 처리
-base_handler를 상속받아 general 도메인 특화 기능 구현
+핵심 기능:
+- 검색만 담당 (LLM 호출 없음)
+- 절대적 Confidence 기반 (FAISS distance → similarity 변환)
+- 최소 지능형: 문서 타입 감지 (규정/연락처/운영계획)
+- 메타데이터 보강으로 사용자 경험 향상
+- 파인튜닝 편의성 극대화
 
-주요 특징:
-- 최고 정확도 요구 (θ=0.70)
-- 규정 조항의 정확한 인용 필수
-- 담당자 연락처 통합 제공
-- 학칙, 전결규정, 운영원칙 종합 검색
-- 법규/정책 해석 및 담당부서 안내
+작성자: 이다니엘 from 경상남도인재개발원
+최종 수정: 2025-08-20
 """
 
 import logging
-from typing import List, Dict, Any, Tuple
-from utils.textifier import TextChunk
+from typing import List, Dict, Any, Optional
+from utils.contracts import ChunkResult, TextChunk
+from utils.index_manager import get_index_manager
+from config.thresholds import HANDLER_THRESHOLDS, DEPARTMENT_CONTACTS
 
-# 프로젝트 모듈
-from handlers.base_handler import base_handler
-from utils.contracts import QueryRequest, HandlerResponse
+# =============================================================================
+# 로거 설정
+# =============================================================================
 
-
-# 로깅 설정
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# GeneralHandler 클래스
+# =============================================================================
 
-class general_handler(base_handler):
+class GeneralHandler:
     """
-    일반 도메인 전용 핸들러
+    일반 정보 검색 핸들러
     
     처리 범위:
-    - hakchik.pdf (학칙+전결규정+운영원칙 통합문서)
-    - task_telephone.csv (업무담당자 연락처)
-    - operation_test.pdf (운영/평가 계획)
-    
-    특징:
-    - 최고 컨피던스 임계값 (θ=0.70)
-    - 정확한 규정 조항 인용
-    - 담당자 연락처 자동 제공
-    - 법규/정책 해석 및 안내
+    - 학칙+전결규정 (hakchik.pdf)
+    - 업무담당자 연락처 (task_telephone.csv)
+    - 운영평가계획 (operation_test.pdf)
     """
     
+    # ================================================================
+    # 🔧 파인튜닝 설정 구역 - 여기서 모든 값 조정 가능
+    # ================================================================
+    
+    # 문서 타입별 키워드 (최소 지능형)
+    REGULATIONS_KEYWORDS = ["학칙", "규정", "조항", "제", "전결", "감점", "기준"]
+    CONTACT_KEYWORDS = ["담당자", "연락처", "부서", "전화", "업무", "담당"]
+    OPERATIONS_KEYWORDS = ["운영", "계획", "평가", "절차", "시행", "방침"]
+    
+    # ================================================================
+    # 🔧 파인튜닝 설정 구역 끝
+    # ================================================================
+    
     def __init__(self):
-        super().__init__(
-            domain="general",
-            index_name="general_index", 
-            confidence_threshold=0.70
-        )
+        """GeneralHandler 초기화"""
+        self.threshold = HANDLER_THRESHOLDS["general"]  # 0.42
+        self.department_info = DEPARTMENT_CONTACTS["general"]
+        self.index_manager = get_index_manager()
         
-        logger.info("📋 general_handler 초기화 완료 (θ=0.70)")
+        logger.info(f"✅ GeneralHandler 초기화 완료 (임계값: {self.threshold})")
     
-    def get_system_prompt(self) -> str:
-        """general 전용 시스템 프롬프트"""
-        return """당신은 "벼리(영문명: Byeoli)"입니다. 경상남도인재개발원의 학칙, 전결규정, 운영원칙 및 업무담당자 연락처 정보를 기반으로 정확하고 체계적인 답변을 제공하는 전문 챗봇입니다.
-
-제공된 일반 도메인 데이터를 기반으로 다음 지침을 엄격히 따르십시오:
-
-1. **최고 수준의 정확성**: 학칙, 전결규정, 운영원칙 등 공식 문서의 내용은 반드시 원문 그대로 정확하게 인용해야 합니다. 해석이나 추측을 하지 마세요.
-
-2. **구체적인 조항 인용**: 규정 관련 질문에는 해당하는 구체적인 조항 번호, 제목, 내용을 명시하여 답변하세요.
-   - 학칙 제○조 (조항명)
-   - 전결규정 제○장 제○조
-   - 운영원칙 제○항
-   
-3. **담당자 연락처 적극 제공**: 업무 관련 질문 시 해당 담당부서와 연락처를 함께 안내하세요.
-   - 담당부서: ○○○
-   - 담당자: ○○○ ○○○
-   - 연락처: 055-254-○○○○
-
-4. **단계별 업무 안내**: 절차가 있는 업무는 단계별로 명확하게 설명하세요.
-
-5. **법규 해석의 한계 명시**: 복잡한 법규 해석이 필요한 경우, 기본 정보를 제공한 후 담당부서 문의를 권하세요.
-
-6. **최신성 고려**: 규정 변경 가능성을 언급하고, 최종 확인을 위해 담당부서 문의를 권하세요.
-
-7. **체계적 구조화**: 답변을 다음과 같이 구조화하세요:
-   - 핵심 답변
-   - 관련 규정 조항
-   - 담당부서 및 연락처
-   - 추가 안내사항
-
-8. **정보 부족 시 대처**: 제공된 데이터로 완전한 답변이 어려운 경우, 알 수 있는 범위까지 답변하고 담당부서 문의를 안내하세요.
-
-9. **업무 연관성 파악**: 질문과 관련된 다른 규정이나 절차가 있다면 함께 안내하세요.
-
-10. **친절하고 공식적인 어조**: 공무원의 업무를 돕는 전문적이면서도 친근한 어조를 유지하세요."""
-
-    def format_context(self, search_results: List[Tuple[str, float, Dict[str, Any]]]) -> str:
-        """general 데이터를 컨텍스트로 포맷"""
-        if not search_results:
-            return "관련 일반 도메인 정보를 찾을 수 없습니다."
+    def search_chunks(self, query: str) -> List[ChunkResult]:
+        """
+        일반 정보 검색 전용 메서드
         
-        context_parts = []
-        
-        # 검색 결과를 문서 타입별로 분류
-        regulations = []  # 학칙, 전결규정 등
-        contacts = []     # 연락처 정보
-        operations = []   # 운영계획 등
-        
-        for text, score, metadata in search_results:
-            doc_type = metadata.get('doc_type', '일반문서')
-            category = metadata.get('category', 'general')
-            source_file = metadata.get('source_file', 'unknown')
+        Args:
+            query: 사용자 질문
             
-            if category == 'contact' or 'telephone' in source_file:
-                contacts.append((text, score, metadata))
-            elif category == 'regulations' or 'hakchik' in source_file:
-                regulations.append((text, score, metadata))
-            elif category == 'operations' or 'operation' in source_file:
-                operations.append((text, score, metadata))
-            else:
-                # 기타 일반 문서
-                context_parts.append(f"[{doc_type}] {text}")
-        
-        # 규정 문서 우선 배치
-        if regulations:
-            context_parts.append("=== 학칙 및 규정 정보 ===")
-            for text, score, metadata in regulations[:3]:  # 상위 3개
-                doc_type = metadata.get('doc_type', '규정문서')
-                page_num = metadata.get('page_number', '')
-                page_info = f" (p.{page_num})" if page_num else ""
-                context_parts.append(f"[{doc_type}{page_info}] {text}")
-        
-        # 담당자 연락처 정보
-        if contacts:
-            context_parts.append("\n=== 담당자 연락처 정보 ===")
-            for text, score, metadata in contacts[:3]:  # 상위 3개
-                context_parts.append(f"[연락처] {text}")
-        
-        # 운영계획 등 기타 정보
-        if operations:
-            context_parts.append("\n=== 운영 및 계획 정보 ===")
-            for text, score, metadata in operations[:2]:  # 상위 2개
-                doc_type = metadata.get('doc_type', '운영문서')
-                context_parts.append(f"[{doc_type}] {text}")
-        
-        # 기타 일반 문서들은 이미 위에서 추가됨
-        
-        final_context = "\n\n".join(context_parts)
-        
-        # 컨텍스트 길이 제한 (너무 긴 경우 후반부 축약)
-        max_length = 4000
-        if len(final_context) > max_length:
-            final_context = final_context[:max_length] + "\n\n[컨텍스트가 길어 일부 생략됨]"
-        
-        return final_context
-
-    def _generate_prompt(self, query: str, retrieved_docs: List[Tuple[TextChunk, float]]) -> str:
+        Returns:
+            List[ChunkResult]: 검색 결과 (상위 3개)
         """
-        일반 도메인에 특화된 최종 프롬프트 생성
-        """
-        # 검색된 문서를 format_context에 맞게 변환
-        formatted_search_results = [(doc.text, score, doc.metadata) for doc, score in retrieved_docs]
-        context = self.format_context(formatted_search_results)
-        system_prompt = self.get_system_prompt()
-        
-        prompt = f"""
-        {system_prompt}
-
-        ---
-        참고 자료 (일반 정보):
-        {context}
-        ---
-
-        사용자 질문:
-        {query}
-
-        답변:
-        """
-        return prompt
-    
-    def _extract_contact_info(self, search_results: List[Tuple[str, float, Dict[str, Any]]]) -> List[str]:
-        """검색 결과에서 연락처 정보 추출"""
-        contacts = []
-        
-        for text, score, metadata in search_results:
-            if metadata.get('category') == 'contact':
-                # 이미 포맷된 연락처 정보
-                contacts.append(text.strip())
-            elif 'phone' in metadata:
-                # 메타데이터에서 연락처 정보 구성
-                dept = metadata.get('department', '')
-                position = metadata.get('position', '')
-                phone = metadata.get('phone', '')
-                task = metadata.get('task_area', '')
+        try:
+            # 1. FAISS 검색 수행
+            vectorstore = self.index_manager.get_vectorstore("general")
+            docs_with_scores = vectorstore.similarity_search_with_score(query, k=5)
+            
+            if not docs_with_scores:
+                logger.warning("일반 정보 검색 결과가 없습니다.")
+                return []
+            
+            # 2. 쿼리 타입 분석 (최소 지능형)
+            preferred_type = self._analyze_query_type(query)
+            
+            # 3. ChunkResult 생성
+            chunk_results = []
+            for i, (doc, distance_score) in enumerate(docs_with_scores):
+                # 거리 → 유사도 변환
+                similarity = self._distance_to_similarity(distance_score)
                 
-                if phone and dept:
-                    contact_text = f"담당부서: {dept}"
-                    if position:
-                        contact_text += f" {position}"
-                    contact_text += f"\n연락처: {phone}"
-                    if task:
-                        contact_text += f"\n담당업무: {task}"
-                    contacts.append(contact_text)
-        
-        return contacts[:3]  # 최대 3개 연락처만 반환
+                # 순위 기반 미세 조정
+                rank_penalty = i * 0.02  # 1등: 0, 2등: -0.02, 3등: -0.04, ...
+                confidence = similarity - rank_penalty
+                
+                # confidence 범위 제한
+                confidence = max(0.0, min(1.0, confidence))
+                
+                # ChunkResult 생성
+                chunk_result = ChunkResult(
+                    chunk=TextChunk(
+                        content=doc.page_content,
+                        metadata=doc.metadata
+                    ),
+                    confidence=confidence,
+                    domain="general",
+                    search_method="faiss",
+                    metadata=self._create_general_metadata(
+                        doc, i + 1, distance_score, similarity, preferred_type
+                    )
+                )
+                
+                chunk_results.append(chunk_result)
+            
+            # 4. confidence 순으로 재정렬 후 상위 3개 반환
+            chunk_results.sort(key=lambda x: x.confidence, reverse=True)
+            top_chunks = chunk_results[:3]
+            
+            logger.info(
+                f"일반 정보 검색 완료: {len(top_chunks)}개 반환 "
+                f"(최고 confidence: {top_chunks[0].confidence:.3f})"
+            )
+            
+            return top_chunks
+            
+        except Exception as e:
+            logger.error(f"일반 정보 검색 실패: {e}")
+            return []
     
-    def _enhance_response_with_contacts(self, base_response: str, search_results: List[Tuple[str, float, Dict[str, Any]]]) -> str:
-        """기본 응답에 관련 담당자 연락처 정보 추가"""
-        contacts = self._extract_contact_info(search_results)
+    def _analyze_query_type(self, query: str) -> Optional[str]:
+        """
+        쿼리에서 선호하는 문서 타입 분석 (최소 지능형)
         
-        if not contacts:
-            return base_response
+        Args:
+            query: 사용자 질문
+            
+        Returns:
+            Optional[str]: "regulations", "contact", "operations", 또는 None
+        """
+        query_lower = query.lower()
         
-        enhanced_response = base_response
+        # regulations 키워드 체크
+        if any(keyword in query_lower for keyword in self.REGULATIONS_KEYWORDS):
+            return "regulations"
         
-        if not any(keyword in base_response for keyword in ['연락처', '담당자', '055-254']):
-            enhanced_response += "\n\n**관련 담당부서 연락처:**\n"
-            for i, contact in enumerate(contacts, 1):
-                enhanced_response += f"\n{i}. {contact}\n"
+        # contact 키워드 체크
+        if any(keyword in query_lower for keyword in self.CONTACT_KEYWORDS):
+            return "contact"
         
-        return enhanced_response
+        # operations 키워드 체크
+        if any(keyword in query_lower for keyword in self.OPERATIONS_KEYWORDS):
+            return "operations"
+        
+        return None
     
-    def handle(self, request: QueryRequest) -> HandlerResponse:
+    def _distance_to_similarity(self, distance: float) -> float:
         """
-        general 도메인 특화 처리
-        기본 handle() 호출 후 연락처 정보 자동 추가
+        FAISS 거리를 유사도로 변환
+        
+        Args:
+            distance: FAISS 거리 점수
+            
+        Returns:
+            float: 유사도 점수 (0.0-1.0)
         """
-        # 기본 핸들러 로직 실행
-        response = super().handle(request)
+        similarity = 1.0 / (1.0 + distance)
         
-        # QueryRequest에서 쿼리 텍스트 추출
-        query = getattr(request, 'query', None) or getattr(request, 'text', '')
+        # 추가 정규화
+        if distance <= 0.1:  # 매우 유사
+            similarity = max(0.9, similarity)
+        elif distance >= 2.0:  # 매우 다름
+            similarity = min(0.3, similarity)
         
-        # general 도메인 특화: 연락처 정보 보강
-        if response.confidence >= self.confidence_threshold:
-            # 재검색하여 연락처 정보 추가
-            search_results = self._hybrid_search(query, k=10)
-            # 검색 결과를 _enhance_response_with_contacts에 맞는 형태로 변환
-            formatted_search_results = [(doc.text, score, doc.metadata) for doc, score in search_results]
-            enhanced_answer = self._enhance_response_with_contacts(response.answer, formatted_search_results)
-            response.answer = enhanced_answer
+        return max(0.0, min(1.0, similarity))
+    
+    def _create_general_metadata(
+        self, 
+        doc, 
+        rank: int, 
+        distance_score: float, 
+        similarity_score: float,
+        preferred_type: Optional[str]
+    ) -> Dict[str, Any]:
+        """
+        일반 정보 특화 메타데이터 생성
         
-        return response
+        Args:
+            doc: 검색된 문서
+            rank: 검색 순위
+            distance_score: FAISS 거리 점수
+            similarity_score: 변환된 유사도 점수
+            preferred_type: 감지된 선호 문서 타입
+            
+        Returns:
+            Dict: 일반 정보 특화 메타데이터
+        """
+        base_metadata = doc.metadata.copy()
+        
+        # 문서 타입별 특화 정보 추가
+        doc_category = base_metadata.get('category', 'general')
+        
+        # 담당부서 정보 (문서 타입에 따라 세분화)
+        if doc_category == 'regulations':
+            department_detail = "학칙 및 규정 관련"
+        elif doc_category == 'contact':
+            department_detail = "업무담당자 연락처"
+        elif doc_category == 'operations':
+            department_detail = "운영 및 평가계획"
+        else:
+            department_detail = self.department_info["description"]
+        
+        # 일반 핸들러 특화 정보 추가
+        base_metadata.update({
+            "department": self.department_info["department"],
+            "contact": self.department_info["phone"],
+            "description": department_detail,
+            "rank": rank,
+            "distance_score": distance_score,
+            "similarity_score": similarity_score,
+            "handler_type": "general",
+            "threshold": self.threshold,
+            "preferred_type": preferred_type,
+            "document_category": doc_category
+        })
+        
+        return base_metadata
 
+# =============================================================================
+# 편의 함수들
+# =============================================================================
+
+def create_general_handler() -> GeneralHandler:
+    """
+    GeneralHandler 인스턴스 생성 편의 함수
+    
+    Returns:
+        GeneralHandler: 일반 정보 핸들러 인스턴스
+    """
+    return GeneralHandler()
+
+# =============================================================================
+# 모듈 테스트
+# =============================================================================
+
+if __name__ == "__main__":
+    print("=== 벼리톡 일반 정보 핸들러 테스트 ===")
+    
+    try:
+        # 핸들러 초기화 테스트
+        handler = GeneralHandler()
+        print(f"✅ 핸들러 초기화: 임계값 = {handler.threshold}")
+        
+        # 문서 타입 분석 테스트
+        test_queries = [
+            "학칙 제5조 내용은?",           # regulations
+            "교육기획담당 연락처는?",        # contact
+            "운영계획 절차 알려줘",         # operations
+            "인재개발원 정보 궁금해",       # general
+        ]
+        
+        for i, query in enumerate(test_queries, 1):
+            print(f"\n--- 테스트 {i}: {query} ---")
+            
+            # 문서 타입 분석 테스트
+            detected = handler._analyze_query_type(query)
+            print(f"감지된 문서 타입: {detected or '일반'}")
+            
+            try:
+                results = handler.search_chunks(query)
+                print(f"검색 결과: {len(results)}개")
+                
+                for j, result in enumerate(results):
+                    print(f"  {j+1}. confidence: {result.confidence:.3f}")
+                    print(f"     domain: {result.domain}")
+                    print(f"     category: {result.chunk.metadata.get('category', 'unknown')}")
+                    print(f"     content: {result.chunk.content[:100]}...")
+                    
+            except Exception as e:
+                print(f"❌ 검색 테스트 실패: {e}")
+        
+        print("\n🎉 모든 테스트 완료!")
+        
+    except Exception as e:
+        print(f"\n❌ 핸들러 테스트 실패: {e}")
+        import traceback
+        traceback.print_exc()
