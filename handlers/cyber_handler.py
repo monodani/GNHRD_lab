@@ -1,389 +1,471 @@
-#!/usr/bin/env python3
+# handlers/cyber_handler.py
 """
-경상남도인재개발원 RAG 챗봇 - cyber_handler
+벼리톡@경상남도인재개발원(BYEOLI-TALK@GNHRD) - 사이버교육 핸들러 v3.1
+Architecture.md 기반 검색 전용 핸들러
 
-사이버교육 일정 전용 핸들러
-base_handler를 상속받아 사이버교육 도메인 특화 기능 구현
+핵심 기능:
+- 검색만 담당 (LLM 호출 없음)
+- 절대적 Confidence 기반 (FAISS distance → similarity 변환)
+- 사이버교육 메타데이터 기반 지능형 필터링 및 가중치
+- 학습시간/인정시간 효율성, 최신성, 평가유무 고려
+- 파인튜닝 편의성 극대화
 
-주요 특징:
-- 민간위탁 사이버교육 (mingan.csv) 처리
-- 나라배움터 사이버교육 (nara.csv) 처리
-- 컨피던스 임계값 θ=0.66 적용
-- 교육과정명, 분류, 학습시간, 평가유무 등 상세 정보 제공
-- 기존 코랩 템플릿 보존 및 활용
+작성자: 이다니엘 from 경상남도인재개발원
+최종 수정: 2025-08-20
 """
 
 import logging
-import re
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Optional
+from utils.contracts import ChunkResult, TextChunk
+from utils.index_manager import get_index_manager
+from config.thresholds import HANDLER_THRESHOLDS, DEPARTMENT_CONTACTS
 
-# 프로젝트 모듈
-from handlers.base_handler import base_handler
-from utils.contracts import QueryRequest, HandlerResponse
-from utils.textifier import TextChunk
+# =============================================================================
+# 로거 설정
+# =============================================================================
 
-# 로깅 설정
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# CyberHandler 클래스
+# =============================================================================
 
-class cyber_handler(base_handler):
+class CyberHandler:
     """
-    사이버교육 일정 전용 핸들러
+    사이버교육 검색 핸들러
     
     처리 범위:
-    - mingan.csv (민간위탁 사이버교육)
-    - nara.csv (나라배움터 사이버교육)
-    - 교육과정 검색, 분류별 필터링, 학습시간 안내
-    
-    특징:
-    - 중간 컨피던스 임계값 (θ=0.66)
-    - 교육 유형별 구분 (민간위탁 vs 나라배움터)
-    - 분류 체계 및 학습 정보 상세 제공
-    - 평가 필요성 및 인정시간 안내
+    - 민간위탁 사이버교육 (mingan.csv)
+    - 나라배움터 사이버교육 (nara.csv)
+    - 학습시간, 인정시간, 최신성, 평가유무 기반 지능형 필터링
     """
     
+    # ================================================================
+    # 🔧 파인튜닝 설정 구역 - 여기서 모든 값 조정 가능
+    # ================================================================
+    
+    # 학습시간 기준치 (시간)
+    SHORT_LEARNING_THRESHOLD = 5.0      # 이 값 이하 = 짧은 교육 (바쁜 직장인 선호)
+    LONG_LEARNING_THRESHOLD = 10.0      # 이 값 이상 = 긴 교육
+    
+    # 인정시간 효율성 기준치 (인정시간/학습시간 비율)
+    HIGH_EFFICIENCY_RATIO = 0.8         # 80% 이상 = 높은 효율성 (학습시간 대비 많은 인정시간)
+    LOW_EFFICIENCY_RATIO = 0.5          # 50% 이하 = 낮은 효율성
+    
+    # 최신성 기준치 (연도)
+    RECENT_DEVELOPMENT_THRESHOLD = 2023  # 이 연도 이후 = 최신 콘텐츠
+    OLD_DEVELOPMENT_THRESHOLD = 2020     # 이 연도 이전 = 오래된 콘텐츠
+    
+    # Confidence 가중치 설정
+    PLATFORM_MATCH_BOOST = 0.03         # 플랫폼 타입 일치시 보너스
+    SHORT_LEARNING_BOOST = 0.04         # 짧은 학습시간 보너스 (가장 중요)
+    HIGH_EFFICIENCY_BOOST = 0.03        # 높은 인정시간 효율성 보너스
+    RECENT_CONTENT_BOOST = 0.02         # 최신 콘텐츠 보너스
+    EVALUATION_FREE_BOOST = 0.02        # 평가 없음 보너스 (나라배움터만)
+    LONG_LEARNING_PENALTY = -0.02       # 긴 학습시간 페널티
+    OLD_CONTENT_PENALTY = -0.02         # 오래된 콘텐츠 페널티
+    
+    # 쿼리 의도 분석 키워드
+    PROFESSIONAL_KEYWORDS = ["전문", "심화", "자세한", "깊이", "상세한", "고급"]
+    CONVENIENCE_KEYWORDS = ["바쁜", "간단한", "짧은", "빠른", "쉬운", "기본"]
+    RECENT_KEYWORDS = ["최신", "신규", "새로운", "업데이트", "2024", "2025"]
+    
+    # 플랫폼 키워드
+    MINGAN_KEYWORDS = ["민간", "민간위탁", "전문", "위탁"]
+    NARA_KEYWORDS = ["나라", "나라배움터", "공공", "정부"]
+    
+    # ================================================================
+    # 🔧 파인튜닝 설정 구역 끝
+    # ================================================================
+    
     def __init__(self):
-        super().__init__(
-            domain="cyber",
-            index_name="cyber_index", 
-            confidence_threshold=0.66
-        )
+        """CyberHandler 초기화"""
+        self.threshold = HANDLER_THRESHOLDS["cyber"]  # 0.48
+        self.department_info = DEPARTMENT_CONTACTS["cyber"]
+        self.index_manager = get_index_manager()
         
-        # 교육 분류 키워드 매핑
-        self.education_categories = {
-            # 나라배움터 분류
-            '직무': ['직무', '업무', '실무', '법률', '제도', '시스템'],
-            '소양': ['소양', '교양', '인문', '문화', '예술', '건강', '취미'],
-            '시책': ['시책', '정책', '제도', '법령', '규정', '청렴', '인권'],
-            '디지털': ['디지털', 'IT', '컴퓨터', '데이터', '온라인', '사이버'],
-            'Gov-MOOC': ['gov-mooc', 'mooc', '무크', '온라인강의'],
-            
-            # 민간위탁 일반 분류
-            '경영': ['경영', '관리', '리더십', '조직', '전략'],
-            '기술': ['기술', '공학', '과학', '연구', '개발'],
-            '외국어': ['영어', '중국어', '일본어', '외국어', '언어']
-        }
-        
-        # 교육 플랫폼 키워드
-        self.platform_keywords = {
-            '민간': ['민간', '민간위탁', '외부', '위탁', 'mingan'],
-            '나라': ['나라', '나라배움터', '정부', '공공', 'nara', '국가'],
-        }
-        
-        logger.info("💻 cyber_handler 초기화 완료 (θ=0.66)")
+        logger.info(f"✅ CyberHandler 초기화 완료 (임계값: {self.threshold})")
     
-    def get_system_prompt(self) -> str:
-        """사이버교육 전용 시스템 프롬프트"""
-        return """당신은 "벼리(영문명: Byeoli)"입니다. 경상남도인재개발원의 사이버교육 과정 정보를 바탕으로 직원들의 온라인 교육 관련 질문에 정확하고 체계적으로 답변하는 전문 챗봇입니다.
-
-제공된 사이버교육 데이터를 기반으로 다음 지침을 엄격히 따르십시오:
-
-1. **교육 플랫폼 구분**: 두 가지 사이버교육 유형을 명확히 구분하여 안내하세요.
-   - **민간위탁 사이버교육**: 외부 기관에서 개발한 전문 교육과정
-   - **나라배움터**: 정부에서 운영하는 공공 온라인 교육플랫폼
-
-2. **정확한 교육 정보 제공**:
-   - 교육과정명: 정확한 과정명 제시
-   - 분류체계: 직무/소양/시책/디지털/Gov-MOOC 등 명확한 분류
-   - 학습시간: 총 학습시간 및 인정시간 구분
-   - 평가여부: 수료를 위한 평가 필요성 안내
-
-3. **민간위탁 교육 상세 정보**:
-   - 개발연도/월: 콘텐츠 제작 시기
-   - 세부 분류: 구분 > 대분류 > 중분류 > 소분류 > 세분류 체계
-   - 학습시간 vs 인정시간 차이점 설명
-
-4. **나라배움터 교육 상세 정보**:
-   - 학습차시: 총 차시 수 및 예상 소요시간
-   - 평가유무: "있습니다" 또는 "없습니다"로 명확히 표기
-   - Gov-MOOC 특별과정 구분
-
-5. **검색 및 추천 기능**:
-   - 분류별 교육과정 목록 제공
-   - 학습시간별 교육과정 추천
-   - 평가 없는 과정 별도 안내
-
-6. **응답 형식**:
-   ```
-   💻 [교육과정명]
-   
-   📚 교육 분류: [분류체계]
-   ⏱️ 학습시간: [시간] / 인정시간: [시간]
-   📝 평가: [있음/없음]
-   🏢 플랫폼: [민간위탁/나라배움터]
-   
-   📖 과정 설명:
-   [상세 설명]
-   ```
-
-7. **교육 신청 안내**: 
-   - 나라배움터: 개별 계정 생성 후 신청
-   - 민간위탁: 교육담당부서를 통한 신청
-   - 문의처: 교육기획담당 (055-254-2052)
-
-8. **분류별 특화 안내**:
-   - **직무교육**: 업무와 직접 관련된 전문교육
-   - **소양교육**: 교양 및 개인역량 개발교육  
-   - **시책교육**: 정부정책 및 제도 이해교육
-   - **디지털교육**: IT 및 디지털 역량 강화교육
-
-9. **학습 계획 지원**: 요청 시 분류별, 시간별 맞춤 교육과정 조합 추천
-
-10. **최신성 안내**: 2025년 기준 교육과정 정보이며, 변경사항은 교육담당부서에 확인 요청"""
-
-    def format_context(self, search_results: List[Tuple[str, float, Dict[str, Any]]]) -> str:
-        """사이버교육 데이터를 컨텍스트로 포맷"""
-        if not search_results:
-            return "관련 사이버교육 정보를 찾을 수 없습니다."
-        
-        context_parts = []
-        
-        # 검색 결과를 플랫폼별로 분류
-        mingan_courses = []  # 민간위탁
-        nara_courses = []    # 나라배움터
-        
-        for text, score, metadata in search_results:
-            template_type = metadata.get('template_type', '')
-            
-            if template_type == 'mingan':
-                mingan_courses.append((text, score, metadata))
-            elif template_type == 'nara':
-                nara_courses.append((text, score, metadata))
-            else:
-                # 기타 사이버교육 관련 정보
-                context_parts.append(f"[사이버교육] {text}")
-        
-        # 민간위탁 교육 우선 배치
-        if mingan_courses:
-            context_parts.append("=== 민간위탁 사이버교육 ===")
-            for text, score, metadata in mingan_courses[:4]:  # 상위 4개
-                course_name = metadata.get('education_course', '')
-                category_path = metadata.get('category_path', '')
-                learning_hours = metadata.get('learning_hours', '')
-                recognition_hours = metadata.get('recognition_hours', '')
-                
-                context_parts.append(f"[민간위탁] {course_name}")
-                context_parts.append(f"분류: {category_path}")
-                context_parts.append(f"시간: {learning_hours}h → 인정: {recognition_hours}h")
-                context_parts.append(f"내용: {text[:200]}...")
-                context_parts.append("")
-        
-        # 나라배움터 교육
-        if nara_courses:
-            context_parts.append("=== 나라배움터 사이버교육 ===")
-            for text, score, metadata in nara_courses[:4]:  # 상위 4개
-                course_name = metadata.get('education_course', '')
-                category = metadata.get('category', '')
-                learning_sessions = metadata.get('learning_sessions', '')
-                recognition_hours = metadata.get('recognition_hours', '')
-                evaluation_required = metadata.get('evaluation_required', '')
-                
-                context_parts.append(f"[나라배움터] {course_name}")
-                context_parts.append(f"분류: {category}")
-                context_parts.append(f"차시: {learning_sessions} / 인정: {recognition_hours}h")
-                context_parts.append(f"평가: {evaluation_required}")
-                context_parts.append(f"내용: {text[:200]}...")
-                context_parts.append("")
-        
-        # 교육 신청 안내 추가
-        context_parts.append("=== 교육 신청 안내 ===")
-        context_parts.append("민간위탁: 교육기획담당 (055-254-2052) 문의")
-        context_parts.append("나라배움터: 개별 계정 생성 후 직접 신청")
-        context_parts.append("문의처: 교육기획담당 055-254-2052")
-        
-        final_context = "\n".join(context_parts)
-        
-        # 컨텍스트 길이 제한
-        max_length = 4000
-        if len(final_context) > max_length:
-            final_context = final_context[:max_length] + "\n\n[컨텍스트가 길어 일부 생략됨]"
-        
-        return final_context
-    
-    def _detect_platform_preference(self, query: str) -> Optional[str]:
-        """질문에서 선호하는 교육 플랫폼 감지"""
-        query_lower = query.lower()
-        
-        for platform, keywords in self.platform_keywords.items():
-            if any(keyword in query_lower for keyword in keywords):
-                return platform
-        
-        return None
-    
-    def _detect_category_preference(self, query: str) -> Optional[str]:
-        """질문에서 선호하는 교육 분류 감지"""
-        query_lower = query.lower()
-        
-        for category, keywords in self.education_categories.items():
-            if any(keyword in query_lower for keyword in keywords):
-                return category
-        
-        return None
-    
-    def _extract_learning_time_preference(self, query: str) -> Optional[Tuple[int, int]]:
-        """질문에서 선호하는 학습시간 범위 추출"""
-        # "3시간 이하", "5-10시간", "짧은", "긴" 등의 패턴 감지
-        time_patterns = [
-            r'(\d+)시간?\s*이하',
-            r'(\d+)-(\d+)시간?',
-            r'(\d+)시간?\s*미만',
-            r'(\d+)시간?\s*정도'
-        ]
-        
-        for pattern in time_patterns:
-            match = re.search(pattern, query)
-            if match:
-                if len(match.groups()) == 1:
-                    # "N시간 이하" 형태
-                    max_hours = int(match.group(1))
-                    return (0, max_hours)
-                elif len(match.groups()) == 2:
-                    # "N-M시간" 형태
-                    min_hours = int(match.group(1))
-                    max_hours = int(match.group(2))
-                    return (min_hours, max_hours)
-        
-        # 키워드 기반 감지
-        if any(keyword in query.lower() for keyword in ['짧은', '간단한', '빠른']):
-            return (0, 5)  # 5시간 이하
-        elif any(keyword in query.lower() for keyword in ['긴', '상세한', '심화']):
-            return (10, 100)  # 10시간 이상
-        
-        return None
-    
-    def _enhance_response_with_recommendations(self, base_response: str, query: str) -> str:
-        """사용자 선호도 기반 추가 추천 정보 제공"""
-        recommendations = []
-        
-        # 플랫폼 선호도 기반 안내
-        platform_pref = self._detect_platform_preference(query)
-        if platform_pref == '민간':
-            recommendations.append("💡 민간위탁 교육은 전문성이 높고 체계적인 분류체계를 제공합니다.")
-        elif platform_pref == '나라':
-            recommendations.append("💡 나라배움터는 무료이며 정부 정책과 연계된 최신 교육을 제공합니다.")
-        
-        # 분류 선호도 기반 안내
-        category_pref = self._detect_category_preference(query)
-        if category_pref:
-            recommendations.append(f"📚 {category_pref} 분야 교육을 원하시는군요. 관련 과정들을 우선 확인해보세요.")
-        
-        # 학습시간 선호도 기반 안내
-        time_pref = self._extract_learning_time_preference(query)
-        if time_pref:
-            min_h, max_h = time_pref
-            recommendations.append(f"⏰ {min_h}-{max_h}시간 범위의 교육과정을 찾으시는군요.")
-        
-        # 평가 부담 고려 안내
-        if any(keyword in query.lower() for keyword in ['평가', '시험', '부담', '쉬운']):
-            recommendations.append("📝 평가가 부담스러우시다면 '평가: 없습니다' 과정을 우선 검토해보세요.")
-        
-        # 추천 정보가 있는 경우에만 추가
-        if recommendations:
-            enhanced_response = base_response + "\n\n=== 맞춤 안내 ===\n" + "\n".join(recommendations)
-            enhanced_response += "\n\n📞 상세 문의: 교육기획담당 055-254-2052"
-            return enhanced_response
-        
-        return base_response
-
-    def _generate_prompt(
-        self,
-        query: str,
-        retrieved_docs: List[Tuple[TextChunk, float]]
-    ) -> str:
+    def search_chunks(self, query: str) -> List[ChunkResult]:
         """
-        base_handler가 요구하는 추상 메서드 구현.
-        - retrieved_docs: (TextChunk, score) 튜플 리스트
-        - format_context()는 (text, score, metadata) 튜플 리스트를 기대하므로 어댑터 변환 필요
+        사이버교육 검색 전용 메서드
+        
+        Args:
+            query: 사용자 질문
+            
+        Returns:
+            List[ChunkResult]: 검색 결과 (상위 3개)
         """
-        # 1) 시스템 프롬프트
-        system_prompt = self.get_system_prompt()
-
-        # 2) 컨텍스트 변환: TextChunk -> (text, score, metadata)
         try:
-            context_tuples = [
-                (doc.text, score, getattr(doc, "metadata", {}) or {})
-                for (doc, score) in (retrieved_docs or [])
-                if doc is not None
-            ]
-        except Exception:
-            # 안전장치: 문제가 생겨도 최소한 빈 컨텍스트로 진행
-            context_tuples = []
-
-        # 3) cyber 전용 컨텍스트 문자열 생성
-        context_block = self.format_context(context_tuples)
-
-        # 4) 최종 프롬프트 결합 (최소 형태)
-        prompt = (
-            f"{system_prompt}\n\n"
-            f"---\n"
-            f"사용자 질문:\n{query}\n\n"
-            f"참고 자료(사이버교육):\n{context_block}\n\n"
-            f"지침:\n"
-            f"- 제공된 참고 자료 내 정보만 사용하세요.\n"
-            f"- 없는 정보는 '데이터에 없음'이라고 답하세요.\n"
-            f"- 플랫폼(민간/나라), 분류, 학습시간, 평가유무를 명확히 표기하세요.\n"
-        )
-        return prompt
-    
-    def handle(self, request: QueryRequest) -> HandlerResponse:
-        """
-        cyber 도메인 특화 처리
-        기본 handle() 호출 후 맞춤 추천 정보 자동 추가
-        """
-        # 기본 핸들러 로직 실행
-        response = super().handle(request)
-        
-        # QueryRequest에서 쿼리 텍스트 추출
-        query = getattr(request, 'query', None) or getattr(request, 'text', '')
-        
-        # cyber 도메인 특화: 맞춤 추천 정보 보강
-        if response.confidence >= self.confidence_threshold:
-            enhanced_answer = self._enhance_response_with_recommendations(response.answer, query)
-            response.answer = enhanced_answer
-        
-        return response
-
-
-
-# ================================================================
-# 테스트 코드 (개발용)
-# ================================================================
-
-if __name__ == "__main__":
-    """cyber_handler 개발 테스트"""
-    print("💻 Cyber Handler 테스트 시작")
-    
-    test_queries = [
-        "나라배움터에서 들을 수 있는 직무교육 추천해줘",
-        "민간위탁 사이버교육 중 5시간 이하 과정 찾아줘",
-        "평가 없는 소양교육 과정이 있나?",
-        "디지털 역량 관련 온라인 교육 알려줘",
-        "Gov-MOOC 과정은 어떤 게 있어?"
-    ]
-    
-    handler = cyber_handler()
-    
-    for i, query in enumerate(test_queries, 1):
-        print(f"\n=== 테스트 {i}: {query} ===")
-        
-        try:
-            from utils.contracts import QueryRequest
-            import uuid
+            # 1. FAISS 검색 수행
+            vectorstore = self.index_manager.get_vectorstore("cyber")
+            docs_with_scores = vectorstore.similarity_search_with_score(query, k=5)
             
-            request = QueryRequest(
-                text=query,
-                context=None,
-                follow_up=False,
-                trace_id=str(uuid.uuid4())
+            if not docs_with_scores:
+                logger.warning("사이버교육 검색 결과가 없습니다.")
+                return []
+            
+            # 2. 쿼리 분석 (플랫폼, 의도, 키워드)
+            preferred_platform = self._analyze_platform_preference(query)
+            query_intent = self._analyze_query_intent(query)
+            
+            # 3. ChunkResult 생성 및 가중치 적용
+            chunk_results = []
+            for i, (doc, distance_score) in enumerate(docs_with_scores):
+                # 거리 → 유사도 변환
+                similarity = self._distance_to_similarity(distance_score)
+                
+                # 순위 기반 미세 조정
+                rank_penalty = i * 0.02  # 1등: 0, 2등: -0.02, 3등: -0.04, ...
+                confidence = similarity - rank_penalty
+                
+                # 사이버교육 메타데이터 기반 가중치 적용
+                confidence = self._apply_cyber_weights(
+                    confidence, doc.metadata, preferred_platform, query_intent
+                )
+                
+                # confidence 범위 제한
+                confidence = max(0.0, min(1.0, confidence))
+                
+                # ChunkResult 생성
+                chunk_result = ChunkResult(
+                    chunk=TextChunk(
+                        content=doc.page_content,
+                        metadata=doc.metadata
+                    ),
+                    confidence=confidence,
+                    domain="cyber",
+                    search_method="faiss",
+                    metadata=self._create_cyber_metadata(
+                        doc, i + 1, distance_score, similarity
+                    )
+                )
+                
+                chunk_results.append(chunk_result)
+            
+            # 4. confidence 순으로 재정렬 후 상위 3개 반환
+            chunk_results.sort(key=lambda x: x.confidence, reverse=True)
+            top_chunks = chunk_results[:3]
+            
+            logger.info(
+                f"사이버교육 검색 완료: {len(top_chunks)}개 반환 "
+                f"(최고 confidence: {top_chunks[0].confidence:.3f})"
             )
             
-            response = handler.handle(request)
-            print(f"응답: {response.answer}")
-            print(f"컨피던스: {response.confidence:.3f}")
-            print(f"소요시간: {response.elapsed_ms}ms")
-            print(f"Citation 수: {len(response.citations)}")
+            return top_chunks
             
         except Exception as e:
-            print(f"❌ 테스트 실패: {e}")
+            logger.error(f"사이버교육 검색 실패: {e}")
+            return []
     
-    print("\n✅ 사이버교육 핸들러 테스트 완료")
+    def _analyze_platform_preference(self, query: str) -> Optional[str]:
+        """
+        쿼리에서 선호하는 플랫폼 분석
+        
+        Args:
+            query: 사용자 질문
+            
+        Returns:
+            Optional[str]: "mingan", "nara", 또는 None
+        """
+        query_lower = query.lower()
+        
+        # mingan 키워드 체크
+        if any(keyword in query_lower for keyword in self.MINGAN_KEYWORDS):
+            return "mingan"
+        
+        # nara 키워드 체크
+        if any(keyword in query_lower for keyword in self.NARA_KEYWORDS):
+            return "nara"
+        
+        return None
+    
+    def _analyze_query_intent(self, query: str) -> str:
+        """
+        쿼리 의도 분석 (전문성 vs 편의성 vs 최신성)
+        
+        Args:
+            query: 사용자 질문
+            
+        Returns:
+            str: "professional", "convenience", "recent", 또는 "general"
+        """
+        query_lower = query.lower()
+        
+        # 전문성 추구 키워드 체크
+        if any(keyword in query_lower for keyword in self.PROFESSIONAL_KEYWORDS):
+            return "professional"
+        
+        # 편의성 추구 키워드 체크
+        if any(keyword in query_lower for keyword in self.CONVENIENCE_KEYWORDS):
+            return "convenience"
+        
+        # 최신성 추구 키워드 체크
+        if any(keyword in query_lower for keyword in self.RECENT_KEYWORDS):
+            return "recent"
+        
+        return "general"
+    
+    def _distance_to_similarity(self, distance: float) -> float:
+        """
+        FAISS 거리를 유사도로 변환
+        
+        Args:
+            distance: FAISS 거리 점수
+            
+        Returns:
+            float: 유사도 점수 (0.0-1.0)
+        """
+        similarity = 1.0 / (1.0 + distance)
+        
+        # 추가 정규화
+        if distance <= 0.1:  # 매우 유사
+            similarity = max(0.9, similarity)
+        elif distance >= 2.0:  # 매우 다름
+            similarity = min(0.3, similarity)
+        
+        return max(0.0, min(1.0, similarity))
+    
+    def _apply_cyber_weights(
+        self, 
+        confidence: float, 
+        metadata: Dict[str, Any], 
+        preferred_platform: Optional[str],
+        query_intent: str
+    ) -> float:
+        """
+        사이버교육 메타데이터 기반 가중치 적용
+        
+        Args:
+            confidence: 기본 confidence 점수
+            metadata: 문서 메타데이터
+            preferred_platform: 선호 플랫폼
+            query_intent: 쿼리 의도
+            
+        Returns:
+            float: 가중치 적용된 confidence
+        """
+        adjusted_confidence = confidence
+        
+        # 1. 플랫폼 매칭 보너스
+        cyber_type = metadata.get('cyber_type')
+        if preferred_platform and cyber_type == preferred_platform:
+            adjusted_confidence += self.PLATFORM_MATCH_BOOST
+            logger.debug(f"플랫폼 매칭 보너스 적용: +{self.PLATFORM_MATCH_BOOST}")
+        
+        # 2. 학습시간 기반 가중치 (쿼리 의도 고려)
+        learning_hours = self._extract_learning_hours(metadata)
+        
+        if query_intent == "professional":
+            # 전문성 추구: 긴 과정 페널티 제거
+            if learning_hours <= self.SHORT_LEARNING_THRESHOLD:
+                adjusted_confidence += self.SHORT_LEARNING_BOOST * 0.5  # 보너스 절반
+        elif query_intent == "convenience":
+            # 편의성 추구: 짧은 과정 보너스 강화
+            if learning_hours <= self.SHORT_LEARNING_THRESHOLD:
+                adjusted_confidence += self.SHORT_LEARNING_BOOST * 1.5  # 보너스 강화
+            elif learning_hours >= self.LONG_LEARNING_THRESHOLD:
+                adjusted_confidence += self.LONG_LEARNING_PENALTY * 1.5  # 페널티 강화
+        else:
+            # 일반적인 경우
+            if learning_hours <= self.SHORT_LEARNING_THRESHOLD:
+                adjusted_confidence += self.SHORT_LEARNING_BOOST
+                logger.debug(f"짧은 학습시간 보너스: +{self.SHORT_LEARNING_BOOST} ({learning_hours}h)")
+            elif learning_hours >= self.LONG_LEARNING_THRESHOLD:
+                adjusted_confidence += self.LONG_LEARNING_PENALTY
+                logger.debug(f"긴 학습시간 페널티: {self.LONG_LEARNING_PENALTY} ({learning_hours}h)")
+        
+        # 3. 인정시간 효율성 보너스
+        recognition_hours = metadata.get('recognition_hours', 0)
+        if learning_hours > 0 and recognition_hours > 0:
+            efficiency_ratio = recognition_hours / learning_hours
+            if efficiency_ratio >= self.HIGH_EFFICIENCY_RATIO:
+                adjusted_confidence += self.HIGH_EFFICIENCY_BOOST
+                logger.debug(f"높은 효율성 보너스: +{self.HIGH_EFFICIENCY_BOOST} (비율: {efficiency_ratio:.2f})")
+        
+        # 4. 최신성 가중치 (쿼리 의도 고려)
+        dev_year = metadata.get('development_year', 0)
+        if dev_year:
+            try:
+                year = int(dev_year)
+                recent_boost = self.RECENT_CONTENT_BOOST
+                old_penalty = self.OLD_CONTENT_PENALTY
+                
+                if query_intent == "recent":
+                    # 최신성 추구: 최신 보너스 강화
+                    recent_boost *= 2.0
+                    old_penalty *= 2.0
+                
+                if year >= self.RECENT_DEVELOPMENT_THRESHOLD:
+                    adjusted_confidence += recent_boost
+                    logger.debug(f"최신 콘텐츠 보너스: +{recent_boost} ({year}년)")
+                elif year <= self.OLD_DEVELOPMENT_THRESHOLD:
+                    adjusted_confidence += old_penalty
+                    logger.debug(f"오래된 콘텐츠 페널티: {old_penalty} ({year}년)")
+            except ValueError:
+                pass
+        
+        # 5. 평가 없음 보너스 (나라배움터만)
+        if cyber_type == 'nara':
+            evaluation = metadata.get('evaluation_required', '')
+            if '없습니다' in evaluation:
+                adjusted_confidence += self.EVALUATION_FREE_BOOST
+                logger.debug(f"평가 없음 보너스: +{self.EVALUATION_FREE_BOOST}")
+        
+        return adjusted_confidence
+    
+    def _extract_learning_hours(self, metadata: Dict[str, Any]) -> float:
+        """
+        메타데이터에서 학습시간 추출 (mingan: learning_hours, nara: learning_sessions)
+        
+        Args:
+            metadata: 문서 메타데이터
+            
+        Returns:
+            float: 학습시간 (시간 단위)
+        """
+        cyber_type = metadata.get('cyber_type')
+        
+        if cyber_type == 'mingan':
+            # 민간위탁: learning_hours 사용
+            return metadata.get('learning_hours', 0)
+        elif cyber_type == 'nara':
+            # 나라배움터: learning_sessions를 학습시간으로 처리
+            sessions = metadata.get('learning_sessions', '0')
+            try:
+                return float(str(sessions).strip())
+            except (ValueError, TypeError):
+                return 0
+        
+        return 0
+    
+    def _create_cyber_metadata(
+        self, 
+        doc, 
+        rank: int, 
+        distance_score: float, 
+        similarity_score: float
+    ) -> Dict[str, Any]:
+        """
+        사이버교육 특화 메타데이터 생성
+        
+        Args:
+            doc: 검색된 문서
+            rank: 검색 순위
+            distance_score: FAISS 거리 점수
+            similarity_score: 변환된 유사도 점수
+            
+        Returns:
+            Dict: 사이버교육 특화 메타데이터
+        """
+        base_metadata = doc.metadata.copy()
+        
+        # 사이버교육 핸들러 특화 정보 추가
+        base_metadata.update({
+            "department": self.department_info["department"],
+            "contact": self.department_info["contact"], 
+            "description": self.department_info["description"],
+            "rank": rank,
+            "distance_score": distance_score,
+            "similarity_score": similarity_score,
+            "handler_type": "cyber",
+            "threshold": self.threshold
+        })
+        
+        return base_metadata
+    
+    def get_handler_info(self) -> Dict[str, Any]:
+        """
+        핸들러 정보 반환 (디버깅/모니터링용)
+        
+        Returns:
+            Dict: 핸들러 설정 정보
+        """
+        return {
+            "domain": "cyber",
+            "threshold": self.threshold,
+            "department_info": self.department_info,
+            "settings": {
+                "short_learning_threshold": self.SHORT_LEARNING_THRESHOLD,
+                "long_learning_threshold": self.LONG_LEARNING_THRESHOLD,
+                "high_efficiency_ratio": self.HIGH_EFFICIENCY_RATIO,
+                "low_efficiency_ratio": self.LOW_EFFICIENCY_RATIO,
+                "recent_development_threshold": self.RECENT_DEVELOPMENT_THRESHOLD,
+                "old_development_threshold": self.OLD_DEVELOPMENT_THRESHOLD,
+                "platform_match_boost": self.PLATFORM_MATCH_BOOST,
+                "short_learning_boost": self.SHORT_LEARNING_BOOST,
+                "high_efficiency_boost": self.HIGH_EFFICIENCY_BOOST,
+                "recent_content_boost": self.RECENT_CONTENT_BOOST,
+                "evaluation_free_boost": self.EVALUATION_FREE_BOOST,
+                "long_learning_penalty": self.LONG_LEARNING_PENALTY,
+                "old_content_penalty": self.OLD_CONTENT_PENALTY
+            },
+            "keywords": {
+                "professional": self.PROFESSIONAL_KEYWORDS,
+                "convenience": self.CONVENIENCE_KEYWORDS,
+                "recent": self.RECENT_KEYWORDS,
+                "mingan": self.MINGAN_KEYWORDS,
+                "nara": self.NARA_KEYWORDS
+            }
+        }
+
+# =============================================================================
+# 편의 함수들
+# =============================================================================
+
+def create_cyber_handler() -> CyberHandler:
+    """
+    CyberHandler 인스턴스 생성 편의 함수
+    
+    Returns:
+        CyberHandler: 사이버교육 핸들러 인스턴스
+    """
+    return CyberHandler()
+
+# =============================================================================
+# 모듈 테스트
+# =============================================================================
+
+if __name__ == "__main__":
+    print("=== 벼리톡 사이버교육 핸들러 테스트 ===")
+    
+    try:
+        # 핸들러 초기화 테스트
+        handler = CyberHandler()
+        print(f"✅ 핸들러 초기화: 임계값 = {handler.threshold}")
+        
+        # 설정 정보 출력
+        info = handler.get_handler_info()
+        print(f"✅ 핸들러 정보: {info['domain']}")
+        print(f"✅ 담당부서: {info['department_info']['department']}")
+        
+        # 테스트 쿼리들
+        test_queries = [
+            "나라배움터에서 짧은 교육 찾아줘",     # nara + convenience
+            "민간위탁 전문 교육 추천해줘",         # mingan + professional
+            "최신 IT 교육 과정 알려줘",           # recent intent
+            "평가 없는 간단한 과정 있어?",        # convenience + evaluation_free
+            "5시간 이하 교육 중 효율적인 거"      # short + efficiency
+        ]
+        
+        for i, query in enumerate(test_queries, 1):
+            print(f"\n--- 테스트 {i}: {query} ---")
+            
+            try:
+                results = handler.search_chunks(query)
+                print(f"검색 결과: {len(results)}개")
+                
+                for j, result in enumerate(results):
+                    print(f"  {j+1}. confidence: {result.confidence:.3f}")
+                    print(f"     domain: {result.domain}")
+                    print(f"     content: {result.chunk.content[:100]}...")
+                    
+            except Exception as e:
+                print(f"❌ 테스트 {i} 실패: {e}")
+        
+        print("\n🎉 모든 테스트 완료!")
+        
+    except Exception as e:
+        print(f"\n❌ 핸들러 테스트 실패: {e}")
+        import traceback
+        traceback.print_exc()
