@@ -1,370 +1,383 @@
-#!/usr/bin/env python3
+# handlers/menu_handler.py
 """
-경상남도인재개발원 RAG 챗봇 - menu_handler
+벼리톡@경상남도인재개발원(BYEOLI-TALK@GNHRD) - 구내식당 메뉴 핸들러 v4.0
+Architecture.md 기반 검색 전용 핸들러
 
-구내식당 식단표 전용 핸들러
-base_handler를 상속받아 식단 도메인 특화 기능 구현
+핵심 기능:
+- 검색만 담당 (LLM 호출 없음)
+- 절대적 Confidence 기반 (FAISS distance → similarity 변환)
+- 최소 지능형: 시간 기반 간단한 가중치만 적용
+- 메타데이터 활용 (별도 파싱 없음)
+- 파인튜닝 편의성 극대화
 
-주요 특징:
-- ChatGPT API 기반 이미지 파싱 결과 활용
-- 요일별/식사별 식단 정보 제공
-- 컨피던스 임계값 θ=0.64 적용
-- 6시간 TTL 캐시 데이터 활용
-- 자연어 식단 질문 처리 최적화
+작성자: 이다니엘 from 경상남도인재개발원
+최종 수정: 2025-08-20
 """
 
 import logging
-import re
-from datetime import datetime, timedelta
-from typing import List, Dict, Any, Tuple, Optional
+from datetime import datetime
+from typing import List, Dict, Any, Optional
+from utils.contracts import ChunkResult, TextChunk
+from utils.index_manager import get_index_manager
+from config.thresholds import HANDLER_THRESHOLDS, DEPARTMENT_CONTACTS
 
+# =============================================================================
+# 로거 설정
+# =============================================================================
 
-# 프로젝트 모듈
-from handlers.base_handler import base_handler
-from utils.contracts import QueryRequest, HandlerResponse
-from utils.textifier import TextChunk
-
-# 로깅 설정
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# MenuHandler 클래스
+# =============================================================================
 
-class menu_handler(base_handler):
+class MenuHandler:
     """
-    구내식당 식단표 전용 핸들러
+    구내식당 메뉴 검색 핸들러
     
     처리 범위:
     - menu.png (ChatGPT API 파싱된 주간 식단표)
-    - menu_YYYYWW.txt (캐시된 주차별 식단 데이터)
-    - 요일별/식사별 식단 검색 및 추천
-    
-    특징:
-    - 낮은 컨피던스 임계값 (θ=0.64)
-    - 자연어 식단 질문 최적화
-    - 시간 기반 현재 식사 추론
-    - 영양 정보 및 메뉴 설명 포함
+    - 요일별/식사별 메뉴 정보
+    - 시간 기반 최소 지능형 가중치 적용
     """
     
+    # ================================================================
+    # 🔧 파인튜닝 설정 구역 - 여기서 모든 값 조정 가능
+    # ================================================================
+    
+    # 시간 기반 간단한 가중치 (최소 지능형)
+    CURRENT_DAY_BOOST = 0.02         # 오늘 식단 보너스
+    CURRENT_MEAL_BOOST = 0.03        # 현재 식사 시간 보너스
+    WEEKEND_PENALTY = -0.01          # 주말 페널티 (구내식당 운영 확인 필요)
+    
+    # 요일 매핑 (한글 ↔ 영문)
+    KOREAN_WEEKDAYS = {
+        0: "월요일", 1: "화요일", 2: "수요일", 
+        3: "목요일", 4: "금요일", 5: "토요일", 6: "일요일"
+    }
+    
+    # 시간대별 식사 타입 매핑
+    MEAL_TIME_MAPPING = {
+        "morning": "조식",    # 0-9시
+        "lunch": "중식",      # 9-14시  
+        "dinner": "석식"      # 14-24시
+    }
+    
+    # ================================================================
+    # 🔧 파인튜닝 설정 구역 끝
+    # ================================================================
+    
     def __init__(self):
-        super().__init__(
-            domain="menu",
-            index_name="menu_index", 
-            confidence_threshold=0.64
-        )
+        """MenuHandler 초기화"""
+        self.threshold = HANDLER_THRESHOLDS["menu"]  # 0.40
+        self.department_info = DEPARTMENT_CONTACTS["menu"]
+        self.index_manager = get_index_manager()
         
-        # 요일 및 식사 매핑 사전
-        self.day_keywords = {
-            '월': '월요일', '월요일': '월요일',
-            '화': '화요일', '화요일': '화요일', 
-            '수': '수요일', '수요일': '수요일',
-            '목': '목요일', '목요일': '목요일',
-            '금': '금요일', '금요일': '금요일',
-            '토': '토요일', '토요일': '토요일',
-            '일': '일요일', '일요일': '일요일'
-        }
-        
-        self.meal_keywords = {
-            '조식': '조식', '아침': '조식', '모닝': '조식',
-            '중식': '중식', '점심': '중식', '런치': '중식',
-            '석식': '석식', '저녁': '석식', '디너': '석식'
-        }
-        
-        logger.info("🍽️ menu_handler 초기화 완료 (θ=0.64)")
+        logger.info(f"✅ MenuHandler 초기화 완료 (임계값: {self.threshold})")
     
-    def get_system_prompt(self) -> str:
-        """식단표 전용 시스템 프롬프트"""
-        return """당신은 "벼리(영문명: Byeoli)"입니다. 경상남도인재개발원 구내식당의 식단표 정보를 바탕으로 직원들의 식사 관련 질문에 친절하고 실용적으로 답변하는 전문 챗봇입니다.
-
-제공된 식단표 데이터를 기반으로 다음 지침을 엄격히 따르십시오:
-
-1. **정확한 식단 정보 제공**: 제공된 데이터 내의 식단 정보만 정확하게 안내하세요. 없는 정보는 추측하지 마세요.
-
-2. **시간 맥락 고려**: 현재 시간과 요일을 고려하여 적절한 식사를 추천하세요.
-   - 오전 9시 이전: 조식 우선 안내
-   - 오전 9시~오후 2시: 중식 우선 안내  
-   - 오후 2시 이후: 석식 우선 안내
-
-3. **요일별 식단 구성**: 월요일부터 금요일까지의 식단을 명확히 구분하여 제시하세요.
-
-4. **친근하고 실용적인 안내**: 
-   - 메뉴 이름과 함께 간단한 설명 추가
-   - 특별한 메뉴나 추천 요리 강조
-   - 식사 시간 및 구내식당 위치 정보 포함
-
-5. **식단 정보 부족 시**: 데이터에 없는 정보는 솔직하게 "해당 정보가 식단표에 없습니다"라고 안내하고, 구내식당에 직접 문의하도록 안내하세요.
-
-6. **영양 및 건강 고려**: 가능한 경우 균형 잡힌 식사 조합을 추천하세요.
-
-7. **응답 형식**:
-   ```
-   🍽️ [요일] [식사] 메뉴
-   
-   주요 메뉴:
-   • 메뉴1 - 간단 설명
-   • 메뉴2 - 간단 설명
-   
-   📍 구내식당 위치: [위치 정보]
-   ⏰ 식사 시간: [시간 정보]
-   ```
-
-8. **주간 식단 요약**: 전체 주간 식단을 문의하는 경우, 요일별로 정리하여 한눈에 보기 쉽게 제시하세요.
-
-9. **식단 변경 알림**: 식단 변경이나 특별 메뉴가 있는 경우 강조하여 안내하세요.
-
-10. **구내식당 관련 추가 정보**: 필요시 다음 정보도 함께 제공하세요.
-    - 구내식당 문의전화: 055-254-2096 (총무담당)
-    - 특별 이벤트나 행사 메뉴 안내"""
-
-    def format_context(self, search_results: List[Tuple[str, float, Dict[str, Any]]]) -> str:
-        """식단표 데이터를 컨텍스트로 포맷"""
-        if not search_results:
-            return "관련 식단표 정보를 찾을 수 없습니다."
-        
-        context_parts = []
-        
-        # 검색 결과를 유형별로 분류
-        weekly_summary = []  # 주간 요약
-        daily_meals = []     # 일일 식사
-        
-        for text, score, metadata in search_results:
-            chunk_type = metadata.get('chunk_type', 'unknown')
-            
-            if chunk_type == 'weekly_summary':
-                weekly_summary.append((text, score, metadata))
-            elif chunk_type == 'meal_detail':
-                daily_meals.append((text, score, metadata))
-            else:
-                # 기타 식단 관련 정보
-                context_parts.append(f"[식단정보] {text}")
-        
-        # 주간 요약 우선 배치
-        if weekly_summary:
-            context_parts.append("=== 주간 식단 요약 ===")
-            for text, score, metadata in weekly_summary[:2]:  # 상위 2개
-                week = metadata.get('week', '')
-                context_parts.append(f"[{week} 주간식단] {text}")
-        
-        # 상세 식사 정보
-        if daily_meals:
-            context_parts.append("\n=== 상세 식사 정보 ===")
-            # 요일 및 식사별로 정렬
-            sorted_meals = sorted(daily_meals, key=lambda x: (
-                x[2].get('day', ''), 
-                x[2].get('meal_type', ''),
-                -x[1]  # 점수 내림차순
-            ))
-            
-            for text, score, metadata in sorted_meals[:6]:  # 상위 6개
-                day = metadata.get('day', '')
-                meal_type = metadata.get('meal_type', '')
-                menu_count = metadata.get('menu_count', 0)
-                context_parts.append(f"[{day} {meal_type} - {menu_count}개 메뉴] {text}")
-        
-        # 현재 시간 정보 추가
-        current_time = datetime.now()
-        context_parts.append(f"\n=== 현재 시간 정보 ===")
-        context_parts.append(f"현재: {current_time.strftime('%Y년 %m월 %d일 (%a) %H:%M')}")
-        context_parts.append(f"현재 요일: {self._get_korean_weekday(current_time.weekday())}")
-        context_parts.append(f"추천 식사: {self._get_recommended_meal_time(current_time.hour)}")
-        
-        final_context = "\n\n".join(context_parts)
-        
-        # 컨텍스트 길이 제한
-        max_length = 3500
-        if len(final_context) > max_length:
-            final_context = final_context[:max_length] + "\n\n[컨텍스트가 길어 일부 생략됨]"
-        
-        return final_context
-    
-    def _get_korean_weekday(self, weekday: int) -> str:
-        """weekday 숫자를 한글 요일로 변환 (0=월요일)"""
-        weekdays = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
-        return weekdays[weekday] if 0 <= weekday <= 6 else '알 수 없음'
-    
-    def _get_recommended_meal_time(self, hour: int) -> str:
-        """현재 시간 기준 추천 식사"""
-        if hour < 9:
-            return "조식"
-        elif hour < 14:
-            return "중식"
-        else:
-            return "석식"
-    
-    def _extract_day_meal_from_query(self, query: str) -> Tuple[Optional[str], Optional[str]]:
-        """질문에서 요일과 식사 타입 추출"""
-        query_lower = query.lower()
-        
-        # 요일 추출
-        detected_day = None
-        for keyword, standard_day in self.day_keywords.items():
-            if keyword in query_lower:
-                detected_day = standard_day
-                break
-        
-        # 식사 타입 추출
-        detected_meal = None
-        for keyword, standard_meal in self.meal_keywords.items():
-            if keyword in query_lower:
-                detected_meal = standard_meal
-                break
-        
-        return detected_day, detected_meal
-    
-    def _enhance_response_with_time_context(self, base_response: str, query: str) -> str:
-        """현재 시간 맥락을 고려한 응답 개선"""
-        current_time = datetime.now()
-        current_hour = current_time.hour
-        current_weekday = current_time.weekday()  # 0=월요일
-        korean_weekday = self._get_korean_weekday(current_weekday)
-        
-        # 시간별 추가 안내
-        time_guidance = ""
-        if current_hour < 9:
-            time_guidance = f"\n\n⏰ 현재 시간({current_hour}시)을 고려하면 조식 시간입니다."
-        elif current_hour < 14:
-            time_guidance = f"\n\n⏰ 현재 시간({current_hour}시)을 고려하면 중식 시간입니다."
-        else:
-            time_guidance = f"\n\n⏰ 현재 시간({current_hour}시)을 고려하면 석식 시간입니다."
-        
-        # 오늘 날짜 관련 안내
-        if current_weekday < 5:  # 평일
-            time_guidance += f"\n📅 오늘은 {korean_weekday}입니다."
-        else:  # 주말
-            time_guidance += f"\n📅 오늘은 {korean_weekday}로 주말입니다. 구내식당 운영 여부를 확인해주세요."
-        
-        # 구내식당 기본 정보 추가 (응답에 없는 경우)
-        if "055-254" not in base_response and "구내식당" not in base_response:
-            time_guidance += f"\n\n📞 구내식당 문의: 055-254-2096 (총무담당)"
-        
-        return base_response + time_guidance
-    
-    def _is_menu_related_query(self, query: str) -> bool:
-        """메뉴 관련 질문인지 판단"""
-        menu_keywords = [
-            '식단', '메뉴', '식사', '밥', '음식', '구내식당', 
-            '조식', '중식', '석식', '아침', '점심', '저녁',
-            '오늘', '내일', '이번주', '월요일', '화요일', '수요일', '목요일', '금요일'
-        ]
-        
-        query_lower = query.lower()
-        return any(keyword in query_lower for keyword in menu_keywords)
-
-    def _generate_prompt(
-        self,
-        query: str,
-        retrieved_docs: List[Tuple[TextChunk, float]]
-    ) -> str:
+    def search_chunks(self, query: str) -> List[ChunkResult]:
         """
-        base_handler가 요구하는 추상 메서드 구현.
-        - retrieved_docs: (TextChunk, score) 튜플 리스트
-        - format_context()는 (text, score, metadata) 튜플 리스트를 기대하므로 어댑터 변환 필요
+        구내식당 메뉴 검색 전용 메서드
+        
+        Args:
+            query: 사용자 질문
+            
+        Returns:
+            List[ChunkResult]: 검색 결과 (상위 3개)
         """
-        # 1) 시스템 프롬프트
-        system_prompt = self.get_system_prompt()
-
-        # 2) 컨텍스트 변환: TextChunk -> (text, score, metadata)
         try:
-            context_tuples = [
-                (doc.text, score, getattr(doc, "metadata", {}) or {})
-                for (doc, score) in (retrieved_docs or [])
-                if doc is not None
-            ]
-        except Exception:
-            # 안전장치: 문제가 생겨도 최소한 빈 컨텍스트로 진행
-            context_tuples = []
-
-        # 3) menu 전용 컨텍스트 문자열 생성
-        context_block = self.format_context(context_tuples)
-
-        # 4) 최종 프롬프트 결합 (최소 형태)
-        prompt = (
-            f"{system_prompt}\n\n"
-            f"---\n"
-            f"사용자 질문:\n{query}\n\n"
-            f"참고 자료(식단표):\n{context_block}\n\n"
-            f"지침:\n"
-            f"- 제공된 참고 자료 내 정보만 사용하세요.\n"
-            f"- 없는 정보는 '식단표에 없음'이라고 답하세요.\n"
-            f"- 현재 요일/시간 맥락을 고려하되, 근거는 참고 자료에서만 취하세요.\n"
-        )
-        return prompt
-
-    
-    
-    def handle(self, request: QueryRequest) -> HandlerResponse:
-        """
-        menu 도메인 특화 처리
-        기본 handle() 호출 후 시간 맥락 정보 자동 추가
-        """
-        # 기본 핸들러 로직 실행
-        response = super().handle(request)
-        
-        # QueryRequest에서 쿼리 텍스트 추출
-        query = getattr(request, 'query', None) or getattr(request, 'text', '')
-        
-        # menu 도메인 특화: 시간 맥락 정보 보강
-        if response.confidence >= self.confidence_threshold and self._is_menu_related_query(query):
-            enhanced_answer = self._enhance_response_with_time_context(response.answer, query)
-            response.answer = enhanced_answer
-        
-        return response
-
-    
-    def get_current_meal_recommendation(self) -> str:
-        """현재 시간 기준 식사 추천 (유틸리티 메서드)"""
-        current_time = datetime.now()
-        current_hour = current_time.hour
-        korean_weekday = self._get_korean_weekday(current_time.weekday())
-        
-        if current_hour < 9:
-            return f"현재는 조식 시간입니다. 오늘({korean_weekday}) 조식 메뉴를 확인해보세요."
-        elif current_hour < 14:
-            return f"현재는 중식 시간입니다. 오늘({korean_weekday}) 점심 메뉴를 확인해보세요."
-        else:
-            return f"현재는 석식 시간입니다. 오늘({korean_weekday}) 저녁 메뉴를 확인해보세요."
-
-
-# ================================================================
-# 테스트 코드 (개발용)
-# ================================================================
-
-if __name__ == "__main__":
-    """menu_handler 개발 테스트"""
-    print("🍽️ Menu Handler 테스트 시작")
-    
-    test_queries = [
-        "오늘 점심 메뉴가 뭐야?",
-        "내일 아침 식단 알려줘",
-        "이번주 월요일 저녁 메뉴는?",
-        "구내식당 석식 시간이 언제야?",
-        "금요일 식단표 보여줘"
-    ]
-    
-    handler = menu_handler()
-    
-    # 현재 시간 기준 추천 테스트
-    print(f"\n현재 시간 추천: {handler.get_current_meal_recommendation()}")
-    
-    for i, query in enumerate(test_queries, 1):
-        print(f"\n=== 테스트 {i}: {query} ===")
-        
-        try:
-            from utils.contracts import QueryRequest
-            import uuid
+            # 1. FAISS 검색 수행
+            vectorstore = self.index_manager.get_vectorstore("menu")
+            docs_with_scores = vectorstore.similarity_search_with_score(query, k=5)
             
-            request = QueryRequest(
-                text=query,
-                context=None,
-                follow_up=False,
-                trace_id=str(uuid.uuid4())
+            if not docs_with_scores:
+                logger.warning("구내식당 메뉴 검색 결과가 없습니다.")
+                return []
+            
+            # 2. 현재 시간 정보 계산
+            current_time = datetime.now()
+            current_weekday = current_time.weekday()  # 0=월요일
+            current_hour = current_time.hour
+            current_korean_weekday = self.KOREAN_WEEKDAYS[current_weekday]
+            current_meal_type = self._get_current_meal_type(current_hour)
+            
+            # 3. ChunkResult 생성 및 최소 지능형 가중치 적용
+            chunk_results = []
+            for i, (doc, distance_score) in enumerate(docs_with_scores):
+                # 거리 → 유사도 변환
+                similarity = self._distance_to_similarity(distance_score)
+                
+                # 순위 기반 미세 조정
+                rank_penalty = i * 0.02  # 1등: 0, 2등: -0.02, 3등: -0.04, ...
+                confidence = similarity - rank_penalty
+                
+                # 최소 지능형: 시간 기반 가중치 적용
+                confidence = self._apply_time_based_weights(
+                    confidence, doc.metadata, current_korean_weekday, 
+                    current_meal_type, current_weekday
+                )
+                
+                # confidence 범위 제한
+                confidence = max(0.0, min(1.0, confidence))
+                
+                # ChunkResult 생성
+                chunk_result = ChunkResult(
+                    chunk=TextChunk(
+                        content=doc.page_content,
+                        metadata=doc.metadata
+                    ),
+                    confidence=confidence,
+                    domain="menu",
+                    search_method="faiss",
+                    metadata=self._create_menu_metadata(
+                        doc, i + 1, distance_score, similarity
+                    )
+                )
+                
+                chunk_results.append(chunk_result)
+            
+            # 4. confidence 순으로 재정렬 후 상위 3개 반환
+            chunk_results.sort(key=lambda x: x.confidence, reverse=True)
+            top_chunks = chunk_results[:3]
+            
+            logger.info(
+                f"구내식당 메뉴 검색 완료: {len(top_chunks)}개 반환 "
+                f"(최고 confidence: {top_chunks[0].confidence:.3f})"
             )
             
-            response = handler.handle(request)
-            print(f"응답: {response.answer}")
-            print(f"컨피던스: {response.confidence:.3f}")
-            print(f"소요시간: {response.elapsed_ms}ms")
-            print(f"Citation 수: {len(response.citations)}")
+            return top_chunks
             
         except Exception as e:
-            print(f"❌ 테스트 실패: {e}")
+            logger.error(f"구내식당 메뉴 검색 실패: {e}")
+            return []
     
-    print("\n✅ 메뉴 핸들러 테스트 완료")
+    def _get_current_meal_type(self, hour: int) -> str:
+        """
+        현재 시간 기준 식사 타입 반환
+        
+        Args:
+            hour: 현재 시간 (0-23)
+            
+        Returns:
+            str: "조식", "중식", "석식"
+        """
+        if hour < 9:
+            return self.MEAL_TIME_MAPPING["morning"]  # 조식
+        elif hour < 14:
+            return self.MEAL_TIME_MAPPING["lunch"]    # 중식
+        else:
+            return self.MEAL_TIME_MAPPING["dinner"]   # 석식
+    
+    def _distance_to_similarity(self, distance: float) -> float:
+        """
+        FAISS 거리를 유사도로 변환
+        
+        Args:
+            distance: FAISS 거리 점수
+            
+        Returns:
+            float: 유사도 점수 (0.0-1.0)
+        """
+        similarity = 1.0 / (1.0 + distance)
+        
+        # 추가 정규화
+        if distance <= 0.1:  # 매우 유사
+            similarity = max(0.9, similarity)
+        elif distance >= 2.0:  # 매우 다름
+            similarity = min(0.3, similarity)
+        
+        return max(0.0, min(1.0, similarity))
+    
+    def _apply_time_based_weights(
+        self, 
+        confidence: float, 
+        metadata: Dict[str, Any], 
+        current_korean_weekday: str,
+        current_meal_type: str,
+        current_weekday: int
+    ) -> float:
+        """
+        최소 지능형: 시간 기반 가중치 적용 (메타데이터 활용)
+        
+        Args:
+            confidence: 기본 confidence 점수
+            metadata: 문서 메타데이터 (loader에서 생성)
+            current_korean_weekday: 현재 한글 요일 ("월요일")
+            current_meal_type: 현재 식사 타입 ("중식")
+            current_weekday: 현재 요일 번호 (0=월요일)
+            
+        Returns:
+            float: 가중치 적용된 confidence
+        """
+        adjusted_confidence = confidence
+        
+        # 1. 오늘 식단 보너스 (메타데이터의 'day'와 현재 요일 비교)
+        menu_day = metadata.get('day')
+        if menu_day == current_korean_weekday:
+            adjusted_confidence += self.CURRENT_DAY_BOOST
+            logger.debug(f"오늘 식단 보너스 적용: +{self.CURRENT_DAY_BOOST} (요일: {menu_day})")
+        
+        # 2. 현재 식사 시간 보너스 (메타데이터의 'meal_type'과 현재 식사 시간 비교)
+        menu_meal_type = metadata.get('meal_type')
+        if menu_meal_type == current_meal_type:
+            adjusted_confidence += self.CURRENT_MEAL_BOOST
+            logger.debug(f"현재 식사 시간 보너스 적용: +{self.CURRENT_MEAL_BOOST} (식사: {menu_meal_type})")
+        
+        # 3. 주말 페널티 (토요일=5, 일요일=6)
+        if current_weekday >= 5:  # 주말
+            adjusted_confidence += self.WEEKEND_PENALTY
+            logger.debug(f"주말 페널티 적용: {self.WEEKEND_PENALTY}")
+        
+        return adjusted_confidence
+    
+    def _create_menu_metadata(
+        self, 
+        doc, 
+        rank: int, 
+        distance_score: float, 
+        similarity_score: float
+    ) -> Dict[str, Any]:
+        """
+        구내식당 메뉴 특화 메타데이터 생성
+        
+        Args:
+            doc: 검색된 문서
+            rank: 검색 순위
+            distance_score: FAISS 거리 점수
+            similarity_score: 변환된 유사도 점수
+            
+        Returns:
+            Dict: 구내식당 메뉴 특화 메타데이터
+        """
+        base_metadata = doc.metadata.copy()
+        
+        # 현재 시간 맥락 정보 추가
+        current_time = datetime.now()
+        current_weekday = current_time.weekday()
+        current_korean_weekday = self.KOREAN_WEEKDAYS[current_weekday]
+        current_meal_type = self._get_current_meal_type(current_time.hour)
+        
+        # 구내식당 핸들러 특화 정보 추가
+        base_metadata.update({
+            "department": self.department_info["department"],
+            "contact": self.department_info["phone"],
+            "description": self.department_info["description"],
+            "rank": rank,
+            "distance_score": distance_score,
+            "similarity_score": similarity_score,
+            "handler_type": "menu",
+            "threshold": self.threshold,
+            # 시간 맥락 정보 (디버깅/UI용)
+            "current_weekday": current_korean_weekday,
+            "current_meal_type": current_meal_type,
+            "is_weekend": current_weekday >= 5,
+            "is_current_day": base_metadata.get('day') == current_korean_weekday,
+            "is_current_meal": base_metadata.get('meal_type') == current_meal_type
+        })
+        
+        return base_metadata
+    
+    def get_handler_info(self) -> Dict[str, Any]:
+        """
+        핸들러 정보 반환 (디버깅/모니터링용)
+        
+        Returns:
+            Dict: 핸들러 설정 정보
+        """
+        return {
+            "domain": "menu",
+            "threshold": self.threshold,
+            "department_info": self.department_info,
+            "approach": "최소 지능형 (시간 기반 간단 가중치)",
+            "settings": {
+                "current_day_boost": self.CURRENT_DAY_BOOST,
+                "current_meal_boost": self.CURRENT_MEAL_BOOST,
+                "weekend_penalty": self.WEEKEND_PENALTY,
+                "korean_weekdays": self.KOREAN_WEEKDAYS,
+                "meal_time_mapping": self.MEAL_TIME_MAPPING
+            },
+            "features": [
+                "오늘 식단 우선 표시",
+                "현재 식사 시간 고려",
+                "주말 운영 안내",
+                "메타데이터 기반 시간 맥락"
+            ],
+            "supported_data": [
+                "주간 식단표 (menu.png)",
+                "요일별 메뉴 (월~금)",
+                "식사별 메뉴 (조식/중식/석식)"
+            ]
+        }
+
+# =============================================================================
+# 편의 함수들
+# =============================================================================
+
+def create_menu_handler() -> MenuHandler:
+    """
+    MenuHandler 인스턴스 생성 편의 함수
+    
+    Returns:
+        MenuHandler: 구내식당 메뉴 핸들러 인스턴스
+    """
+    return MenuHandler()
+
+# =============================================================================
+# 모듈 테스트
+# =============================================================================
+
+if __name__ == "__main__":
+    print("=== 벼리톡 구내식당 메뉴 핸들러 테스트 ===")
+    
+    try:
+        # 핸들러 초기화 테스트
+        handler = MenuHandler()
+        print(f"✅ 핸들러 초기화: 임계값 = {handler.threshold}")
+        
+        # 설정 정보 출력
+        info = handler.get_handler_info()
+        print(f"✅ 핸들러 정보: {info['domain']}")
+        print(f"✅ 담당부서: {info['department_info']['department']}")
+        print(f"✅ 접근 방식: {info['approach']}")
+        print(f"✅ 특징: {', '.join(info['features'])}")
+        
+        # 현재 시간 기준 테스트
+        current_time = datetime.now()
+        current_meal = handler._get_current_meal_type(current_time.hour)
+        current_day = handler.KOREAN_WEEKDAYS[current_time.weekday()]
+        print(f"✅ 현재 시간 맥락: {current_day} {current_meal} ({current_time.hour}시)")
+        
+        # 테스트 쿼리들
+        test_queries = [
+            "오늘 점심 메뉴가 뭐야?",           # 현재 식사 + 오늘
+            "내일 아침 식단 알려줘",            # 미래 식사
+            "이번주 월요일 저녁은?",            # 특정 요일
+            "구내식당 운영시간은?",             # 일반 정보
+            "금요일 전체 식단 보여줘"           # 하루 전체
+        ]
+        
+        for i, query in enumerate(test_queries, 1):
+            print(f"\n--- 테스트 {i}: {query} ---")
+            
+            try:
+                results = handler.search_chunks(query)
+                print(f"검색 결과: {len(results)}개")
+                
+                for j, result in enumerate(results):
+                    meta = result.metadata
+                    print(f"  {j+1}. confidence: {result.confidence:.3f}")
+                    print(f"     domain: {result.domain}")
+                    print(f"     day: {result.chunk.metadata.get('day', 'unknown')}")
+                    print(f"     meal_type: {result.chunk.metadata.get('meal_type', 'unknown')}")
+                    print(f"     is_current_day: {meta.get('is_current_day', False)}")
+                    print(f"     is_current_meal: {meta.get('is_current_meal', False)}")
+                    
+            except Exception as e:
+                print(f"❌ 테스트 {i} 실패: {e}")
+        
+        print("\n🎉 모든 테스트 완료!")
+        
+    except Exception as e:
+        print(f"\n❌ 핸들러 테스트 실패: {e}")
+        import traceback
+        traceback.print_exc()
