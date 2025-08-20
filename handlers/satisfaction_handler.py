@@ -1,258 +1,376 @@
-#!/usr/bin/env python3
+# handlers/satisfaction_handler.py
 """
-경상남도인재개발원 RAG 챗봇 - satisfaction_handler (수정본)
+벼리톡@경상남도인재개발원(BYEOLI-TALK@GNHRD) - 만족도 조사 핸들러 v3.1
+Architecture.md 기반 검색 전용 핸들러
 
-주요 수정사항:
-✅ import 경로 수정
-✅ 클래스명 일치
-✅ 메서드 시그니처 개선
+핵심 기능:
+- 검색만 담당 (LLM 호출 없음)
+- 절대적 Confidence 기반 (FAISS distance → similarity 변환)
+- 만족도 메타데이터 기반 지능형 필터링 및 가중치
+- 파인튜닝 편의성 극대화
+
+작성자: 이다니엘 from 경상남도인재개발원
+최종 수정: 2025-08-20
 """
 
 import logging
-import re
-import uuid
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Optional
+from utils.contracts import ChunkResult, TextChunk
+from utils.index_manager import get_index_manager
+from config.thresholds import HANDLER_THRESHOLDS, DEPARTMENT_CONTACTS
 
-# 프로젝트 모듈
-from handlers.base_handler import base_handler
-from utils.contracts import QueryRequest, HandlerResponse
-from utils.textifier import TextChunk
+# =============================================================================
+# 로거 설정
+# =============================================================================
 
-# 로깅 설정
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# SatisfactionHandler 클래스
+# =============================================================================
 
-class satisfaction_handler(base_handler):
+class SatisfactionHandler:
     """
-    만족도 조사 데이터 전용 핸들러
+    만족도 조사 검색 핸들러
     
     처리 범위:
     - 교육과정 만족도 (course_satisfaction.csv)
     - 교과목 만족도 (subject_satisfaction.csv)
-    - 통합 만족도 분석 및 순위 정보
-    - 정량적 점수 + 정성적 의견 통합 제공
+    - 메타데이터 기반 지능형 필터링 및 가중치 적용
     """
+    
+    # ================================================================
+    # 🔧 파인튜닝 설정 구역 - 여기서 모든 값 조정 가능
+    # ================================================================
+    
+    # 만족도 점수 기준치
+    HIGH_SATISFACTION_THRESHOLD = 4.60    # 이 값 이상 = 높은/좋은 점수
+    LOW_SATISFACTION_THRESHOLD = 4.15     # 이 값 이하 = 낮은/좋지 못한 점수
+    
+    # 순위 상위권 기준치
+    COURSE_TOP_RANKING_THRESHOLD = 50     # 교육과정 상위권 기준 (50위 이내)
+    SUBJECT_TOP_RANKING_THRESHOLD = 500   # 교과목 상위권 기준 (500위 이내)
+    
+    # 순위 하위권 기준치
+    COURSE_BOTTOM_RANKING_THRESHOLD = 130   # 교육과정 하위권 기준 (130위 이상)
+    SUBJECT_BOTTOM_RANKING_THRESHOLD = 1500 # 교과목 하위권 기준 (1500위 이상)
+    
+    # Confidence 가중치 설정
+    TYPE_MATCH_BOOST = 0.03              # 타입 일치시 보너스
+    HIGH_SATISFACTION_BOOST = 0.05       # 높은 만족도 보너스
+    LOW_SATISFACTION_PENALTY = -0.03     # 낮은 만족도 페널티
+    TOP_RANKING_BOOST = 0.02             # 상위권 보너스
+    BOTTOM_RANKING_PENALTY = -0.02       # 하위권 페널티
+    
+    # 타입 필터링 키워드
+    COURSE_KEYWORDS = ["교육과정"]
+    SUBJECT_KEYWORDS = ["교과목", "강의"]
+    
+    # ================================================================
+    # 🔧 파인튜닝 설정 구역 끝
+    # ================================================================
     
     def __init__(self):
-        """satisfaction_handler 초기화"""
-        super().__init__(
-            domain="satisfaction",
-            index_name="satisfaction_index", 
-            confidence_threshold=0.68
-        )
-        logger.info("📊 satisfaction_handler 초기화 완료 (θ=0.68)")
+        """SatisfactionHandler 초기화"""
+        self.threshold = HANDLER_THRESHOLDS["satisfaction"]  # 0.45
+        self.department_info = DEPARTMENT_CONTACTS["satisfaction"]
+        self.index_manager = get_index_manager()
+        
+        logger.info(f"✅ SatisfactionHandler 초기화 완료 (임계값: {self.threshold})")
     
-    def get_system_prompt(self) -> str:
-        """만족도 전용 시스템 프롬프트"""
-        return """당신은 "벼리(영문명: Byeoli)"입니다. 경상남도인재개발원의 교육과정 및 교과목 만족도 조사 데이터를 분석하여 사용자 질문에 정확하고 친절하게 답변하는 전문 챗봇입니다.
-
-제공된 만족도 데이터를 기반으로 다음 지침을 엄격히 따르십시오:
-
-1. **데이터 기반 답변**: 반드시 제공된 컨텍스트 내의 정보를 기반으로 답변해야 합니다. 추측하거나 없는 정보를 만들어내지 마세요.
-
-2. **정확성**: 만족도 조사 결과(점수, 의견, 순위 등)는 정확하게 제시하세요.
-   - 전반만족도, 역량향상도, 현업적용도, 교과편성 만족도, 강의만족도 구분
-   - 교육과정별/교과목별 순위 정보 포함
-   - 점수는 소수점 둘째 자리까지 정확히 표기
-
-3. **정보 부족 시 대처**: 만약 제공된 데이터만으로는 질문에 답변할 수 없다면, 솔직하게 "해당 정보는 제가 가지고 있는 만족도 조사 데이터에서 찾을 수 없습니다."라고 답하고 추가적인 질문을 요청하세요.
-
-4. **친절하고 간결한 어조**: 항상 친절하고 명확하며 간결하게 답변하세요.
-
-5. **불필요한 서론/결론 제거**: 핵심 정보에 집중하여 군더더기 없는 답변을 제공하세요.
-
-6. **정량적, 정성적 정보 혼합**: 답변에 점수와 같은 정량적 정보와, 교육생의 의견과 같은 정성적 정보를 함께 제시하여 풍부한 답변을 제공하세요.
-
-7. **교육과정 vs 교과목 구분**: 
-   - 교육과정 만족도: 전체 과정에 대한 종합적 평가
-   - 교과목 만족도: 개별 강의/과목에 대한 평가
-   명확히 구분하여 답변하세요.
-
-8. **순위 정보 활용**: 해당 연도 전체 교육과정/교과목 중 몇 위인지 순위 정보를 포함하여 상대적 성과를 제시하세요."""
-
-    def format_context(self, search_results: List[Tuple[TextChunk, float]]) -> str:
-        """만족도 데이터를 컨텍스트로 포맷"""
-        if not search_results:
-            return "관련 만족도 데이터를 찾을 수 없습니다."
-        
-        context_parts = []
-        
-        for i, (doc, score) in enumerate(search_results[:5], 1):
-            # 메타데이터에서 추가 정보 추출
-            metadata = doc.metadata if hasattr(doc, 'metadata') else {}
-            source_info = ""
-            
-            if metadata.get('source_file'):
-                source_info = f"[출처: {metadata['source_file']}]"
-            
-            if metadata.get('satisfaction_type'):
-                source_info += f" [{metadata['satisfaction_type']}]"
-            
-            # TextChunk 객체에서 텍스트 추출
-            text = doc.text if hasattr(doc, 'text') else str(doc)
-            
-            context_part = f"""=== 만족도 데이터 {i} ===
-{source_info}
-유사도 점수: {score:.3f}
-
-{text}
-
-"""
-            context_parts.append(context_part)
-        
-        return "\n".join(context_parts)
-
-    def _generate_prompt(self, query: str, retrieved_docs: List[Tuple[TextChunk, float]]) -> str:
+    def search_chunks(self, query: str) -> List[ChunkResult]:
         """
-        만족도 도메인에 특화된 최종 프롬프트 생성
+        만족도 조사 검색 전용 메서드
+        
+        Args:
+            query: 사용자 질문
+            
+        Returns:
+            List[ChunkResult]: 검색 결과 (상위 3개)
         """
-        system_prompt = self.get_system_prompt()
-        context = self.format_context(retrieved_docs)
-        
-        prompt = f"""{system_prompt}
-
----
-참고 자료 (만족도 데이터):
-{context}
----
-
-사용자 질문:
-{query}
-
-답변:"""
-        
-        return prompt
-    
-    def handle(self, request: QueryRequest) -> HandlerResponse:
-        """
-        만족도 질의 처리 (follow_up 완화 로직 포함)
-        """
-        # QueryRequest에서 필요한 정보 추출
-        query = getattr(request, 'query', None) or getattr(request, 'text', '')
-        follow_up = getattr(request, 'follow_up', False)
-        
-        # follow_up인 경우 컨피던스 임계값 완화
-        original_threshold = self.confidence_threshold
-        if follow_up:
-            self.confidence_threshold = max(0.0, original_threshold - 0.02)
-            logger.info(f"🔄 Follow-up 질의: 임계값 완화 {original_threshold:.2f} → {self.confidence_threshold:.2f}")
-        
         try:
-            # base_handler의 표준 처리 로직 사용
-            response = super().handle(request)
+            # 1. FAISS 검색 수행
+            vectorstore = self.index_manager.get_vectorstore("satisfaction")
+            docs_with_scores = vectorstore.similarity_search_with_score(query, k=5)
             
-            # 만족도 특화 후처리
-            if response.confidence >= self.confidence_threshold:
-                # 응답에 만족도 도메인 힌트 추가
-                if "점" in response.answer and any(keyword in query for keyword in ["만족도", "점수", "평가"]):
-                    response.answer = self._standardize_satisfaction_scores(response.answer)
+            if not docs_with_scores:
+                logger.warning("만족도 검색 결과가 없습니다.")
+                return []
+            
+            # 2. 쿼리 타입 분석 (course vs subject 우선순위)
+            preferred_type = self._analyze_query_type(query)
+            
+            # 3. ChunkResult 생성 및 가중치 적용
+            chunk_results = []
+            for i, (doc, distance_score) in enumerate(docs_with_scores):
+                # 거리 → 유사도 변환
+                similarity = self._distance_to_similarity(distance_score)
                 
-                logger.info(f"✅ 만족도 답변 생성 완료 (confidence={response.confidence:.3f})")
-            else:
-                # 낮은 컨피던스인 경우 재질문 유도
-                response.answer = self._generate_reask_response(query, response.confidence)
-                logger.warning(f"⚠️ 낮은 컨피던스로 재질문 유도 (confidence={response.confidence:.3f})")
-            
-            return response
-            
-        finally:
-            # 임계값 복원
-            self.confidence_threshold = original_threshold
-    
-    def _standardize_satisfaction_scores(self, answer: str) -> str:
-        """만족도 점수 표기 표준화"""
-        # 점수 패턴 정규화 (예: "4.5점" → "4.50점")
-        score_pattern = r'(\d+\.\d{1})점'
-        standardized = re.sub(score_pattern, r'\g<1>0점', answer)
-        
-        return standardized
-    
-    def _generate_reask_response(self, query: str, confidence: float) -> str:
-        """낮은 컨피던스 시 재질문 유도 응답"""
-        reask_suggestions = []
-        
-        # 쿼리 분석해서 구체적인 재질문 제안
-        if "만족도" in query:
-            if "교육과정" not in query and "교과목" not in query:
-                reask_suggestions.append("'교육과정 만족도' 또는 '교과목 만족도' 중 어떤 것을 원하시는지")
-            
-            if not any(year in query for year in ["2024", "2025"]):
-                reask_suggestions.append("구체적인 연도(예: 2024년, 2025년)")
+                # 순위 기반 미세 조정
+                rank_penalty = i * 0.02  # 1등: 0, 2등: -0.02, 3등: -0.04, ...
+                confidence = similarity - rank_penalty
                 
-            if not any(keyword in query for keyword in ["과정명", "교과목명", "강의명"]):
-                reask_suggestions.append("특정 교육과정명이나 교과목명")
-        
-        base_response = f"죄송합니다. 요청하신 만족도 정보를 정확히 찾기 어렵습니다. (신뢰도: {confidence:.2f})"
-        
-        if reask_suggestions:
-            suggestion_text = ", ".join(reask_suggestions)
-            base_response += f"\n\n더 정확한 답변을 위해 다음 정보를 추가해서 다시 질문해 주세요:\n- {suggestion_text}"
-        else:
-            base_response += "\n\n다른 방식으로 질문해 주시거나, 좀 더 구체적인 정보를 포함해서 다시 질문해 주세요."
-        
-        return base_response
-
-
-# 편의 함수 (기존 API 호환성)
-def handle_satisfaction_query(query: str, temperature: float = 0.1, k: int = 5) -> str:
-    """
-    기존 코랩 코드 호환을 위한 편의 함수
-    
-    Args:
-        query: 사용자 질문
-        temperature: LLM 온도 (사용되지 않음, 호환성을 위해 유지)
-        k: 검색 문서 수 (사용되지 않음, 호환성을 위해 유지)
-        
-    Returns:
-        응답 텍스트
-    """
-    handler = satisfaction_handler()
-    request = QueryRequest(
-        query=query,
-        text=query,
-        context=None,
-        follow_up=False,
-        trace_id=str(uuid.uuid4())
-    )
-    
-    response = handler.handle(request)
-    return response.answer
-
-
-# 테스트용 메인 함수
-if __name__ == "__main__":
-    # 기본 테스트
-    test_queries = [
-        "중견리더과정의 만족도와 교육생 의견에 대해 알려줘.",
-        "2024년 교육과정 중 만족도가 가장 높은 과정은?",
-        "신임공무원 교육과정의 역량향상도 점수는?",
-        "교과목 만족도 상위 5개 강의는?"
-    ]
-    
-    handler = satisfaction_handler()
-    
-    for i, query_text in enumerate(test_queries, 1):
-        print(f"\n=== 테스트 {i}: {query_text} ===")
-        
-        try:
-            request = QueryRequest(
-                query=query_text,
-                text=query_text,
-                context=None,
-                follow_up=False,
-                trace_id=str(uuid.uuid4())
+                # 만족도 메타데이터 기반 가중치 적용
+                confidence = self._apply_satisfaction_weights(
+                    confidence, doc.metadata, preferred_type
+                )
+                
+                # confidence 범위 제한
+                confidence = max(0.0, min(1.0, confidence))
+                
+                # ChunkResult 생성
+                chunk_result = ChunkResult(
+                    chunk=TextChunk(
+                        content=doc.page_content,
+                        metadata=doc.metadata
+                    ),
+                    confidence=confidence,
+                    domain="satisfaction",
+                    search_method="faiss",
+                    metadata=self._create_satisfaction_metadata(
+                        doc, i + 1, distance_score, similarity
+                    )
+                )
+                
+                chunk_results.append(chunk_result)
+            
+            # 4. confidence 순으로 재정렬 후 상위 3개 반환
+            chunk_results.sort(key=lambda x: x.confidence, reverse=True)
+            top_chunks = chunk_results[:3]
+            
+            logger.info(
+                f"만족도 검색 완료: {len(top_chunks)}개 반환 "
+                f"(최고 confidence: {top_chunks[0].confidence:.3f})"
             )
             
-            response = handler.handle(request)
-            print(f"응답: {response.answer[:200]}...")  # 처음 200자만 출력
-            print(f"컨피던스: {response.confidence:.3f}")
-            print(f"소요시간: {response.elapsed_ms:.2f}ms")
-            print(f"Citation 수: {len(response.citations)}")
-            print(f"성공 여부: {'✅' if response.success else '❌'}")
+            return top_chunks
             
         except Exception as e:
-            print(f"❌ 테스트 실패: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"만족도 검색 실패: {e}")
+            return []
     
-    print("\n✅ 만족도 핸들러 테스트 완료")
+    def _analyze_query_type(self, query: str) -> Optional[str]:
+        """
+        쿼리에서 선호하는 데이터 타입 분석
+        
+        Args:
+            query: 사용자 질문
+            
+        Returns:
+            Optional[str]: "course", "subject", 또는 None
+        """
+        query_lower = query.lower()
+        
+        # course 키워드 체크
+        if any(keyword in query_lower for keyword in self.COURSE_KEYWORDS):
+            return "course"
+        
+        # subject 키워드 체크
+        if any(keyword in query_lower for keyword in self.SUBJECT_KEYWORDS):
+            return "subject"
+        
+        return None
+    
+    def _distance_to_similarity(self, distance: float) -> float:
+        """
+        FAISS 거리를 유사도로 변환
+        
+        Args:
+            distance: FAISS 거리 점수
+            
+        Returns:
+            float: 유사도 점수 (0.0-1.0)
+        """
+        similarity = 1.0 / (1.0 + distance)
+        
+        # 추가 정규화
+        if distance <= 0.1:  # 매우 유사
+            similarity = max(0.9, similarity)
+        elif distance >= 2.0:  # 매우 다름
+            similarity = min(0.3, similarity)
+        
+        return max(0.0, min(1.0, similarity))
+    
+    def _apply_satisfaction_weights(
+        self, 
+        confidence: float, 
+        metadata: Dict[str, Any], 
+        preferred_type: Optional[str]
+    ) -> float:
+        """
+        만족도 메타데이터 기반 가중치 적용
+        
+        Args:
+            confidence: 기본 confidence 점수
+            metadata: 문서 메타데이터
+            preferred_type: 선호 데이터 타입
+            
+        Returns:
+            float: 가중치 적용된 confidence
+        """
+        adjusted_confidence = confidence
+        
+        # 1. 타입 매칭 보너스
+        satisfaction_type = metadata.get('satisfaction_type')
+        if preferred_type and satisfaction_type == preferred_type:
+            adjusted_confidence += self.TYPE_MATCH_BOOST
+            logger.debug(f"타입 매칭 보너스 적용: +{self.TYPE_MATCH_BOOST}")
+        
+        # 2. 만족도 점수 기반 가중치
+        if satisfaction_type == 'course':
+            # 교육과정: overall_satisfaction 또는 comprehensive_satisfaction 사용
+            satisfaction_score = (
+                metadata.get('overall_satisfaction', 0) or 
+                metadata.get('comprehensive_satisfaction', 0)
+            )
+        else:
+            # 교과목: lecture_satisfaction 사용
+            satisfaction_score = metadata.get('lecture_satisfaction', 0)
+        
+        if satisfaction_score >= self.HIGH_SATISFACTION_THRESHOLD:
+            adjusted_confidence += self.HIGH_SATISFACTION_BOOST
+            logger.debug(f"높은 만족도 보너스 적용: +{self.HIGH_SATISFACTION_BOOST} (점수: {satisfaction_score})")
+        elif satisfaction_score <= self.LOW_SATISFACTION_THRESHOLD:
+            adjusted_confidence += self.LOW_SATISFACTION_PENALTY
+            logger.debug(f"낮은 만족도 페널티 적용: {self.LOW_SATISFACTION_PENALTY} (점수: {satisfaction_score})")
+        
+        # 3. 순위 기반 가중치
+        if satisfaction_type == 'course':
+            ranking = metadata.get('course_ranking', 999)
+            if ranking <= self.COURSE_TOP_RANKING_THRESHOLD:
+                adjusted_confidence += self.TOP_RANKING_BOOST
+                logger.debug(f"상위권 교육과정 보너스: +{self.TOP_RANKING_BOOST} (순위: {ranking})")
+            elif ranking >= self.COURSE_BOTTOM_RANKING_THRESHOLD:
+                adjusted_confidence += self.BOTTOM_RANKING_PENALTY
+                logger.debug(f"하위권 교육과정 페널티: {self.BOTTOM_RANKING_PENALTY} (순위: {ranking})")
+        
+        elif satisfaction_type == 'subject':
+            ranking = metadata.get('subject_ranking', 999)
+            if ranking <= self.SUBJECT_TOP_RANKING_THRESHOLD:
+                adjusted_confidence += self.TOP_RANKING_BOOST
+                logger.debug(f"상위권 교과목 보너스: +{self.TOP_RANKING_BOOST} (순위: {ranking})")
+            elif ranking >= self.SUBJECT_BOTTOM_RANKING_THRESHOLD:
+                adjusted_confidence += self.BOTTOM_RANKING_PENALTY
+                logger.debug(f"하위권 교과목 페널티: {self.BOTTOM_RANKING_PENALTY} (순위: {ranking})")
+        
+        return adjusted_confidence
+    
+    def _create_satisfaction_metadata(
+        self, 
+        doc, 
+        rank: int, 
+        distance_score: float, 
+        similarity_score: float
+    ) -> Dict[str, Any]:
+        """
+        만족도 특화 메타데이터 생성
+        
+        Args:
+            doc: 검색된 문서
+            rank: 검색 순위
+            distance_score: FAISS 거리 점수
+            similarity_score: 변환된 유사도 점수
+            
+        Returns:
+            Dict: 만족도 특화 메타데이터
+        """
+        base_metadata = doc.metadata.copy()
+        
+        # 만족도 핸들러 특화 정보 추가
+        base_metadata.update({
+            "department": self.department_info["department"],
+            "contact": self.department_info["contact"], 
+            "description": self.department_info["description"],
+            "rank": rank,
+            "distance_score": distance_score,
+            "similarity_score": similarity_score,
+            "handler_type": "satisfaction",
+            "threshold": self.threshold
+        })
+        
+        return base_metadata
+    
+    def get_handler_info(self) -> Dict[str, Any]:
+        """
+        핸들러 정보 반환 (디버깅/모니터링용)
+        
+        Returns:
+            Dict: 핸들러 설정 정보
+        """
+        return {
+            "domain": "satisfaction",
+            "threshold": self.threshold,
+            "department_info": self.department_info,
+            "settings": {
+                "high_satisfaction_threshold": self.HIGH_SATISFACTION_THRESHOLD,
+                "low_satisfaction_threshold": self.LOW_SATISFACTION_THRESHOLD,
+                "course_top_ranking": self.COURSE_TOP_RANKING_THRESHOLD,
+                "subject_top_ranking": self.SUBJECT_TOP_RANKING_THRESHOLD,
+                "course_bottom_ranking": self.COURSE_BOTTOM_RANKING_THRESHOLD,
+                "subject_bottom_ranking": self.SUBJECT_BOTTOM_RANKING_THRESHOLD,
+                "type_match_boost": self.TYPE_MATCH_BOOST,
+                "high_satisfaction_boost": self.HIGH_SATISFACTION_BOOST,
+                "low_satisfaction_penalty": self.LOW_SATISFACTION_PENALTY,
+                "top_ranking_boost": self.TOP_RANKING_BOOST,
+                "bottom_ranking_penalty": self.BOTTOM_RANKING_PENALTY
+            }
+        }
+
+# =============================================================================
+# 편의 함수들
+# =============================================================================
+
+def create_satisfaction_handler() -> SatisfactionHandler:
+    """
+    SatisfactionHandler 인스턴스 생성 편의 함수
+    
+    Returns:
+        SatisfactionHandler: 만족도 핸들러 인스턴스
+    """
+    return SatisfactionHandler()
+
+# =============================================================================
+# 모듈 테스트
+# =============================================================================
+
+if __name__ == "__main__":
+    print("=== 벼리톡 만족도 핸들러 테스트 ===")
+    
+    try:
+        # 핸들러 초기화 테스트
+        handler = SatisfactionHandler()
+        print(f"✅ 핸들러 초기화: 임계값 = {handler.threshold}")
+        
+        # 설정 정보 출력
+        info = handler.get_handler_info()
+        print(f"✅ 핸들러 정보: {info['domain']}")
+        print(f"✅ 담당부서: {info['department_info']['department']}")
+        
+        # 테스트 쿼리들
+        test_queries = [
+            "중견리더과정의 만족도는?",  # course 타입 매칭
+            "리더십 강의 만족도는?",      # subject 타입 매칭
+            "2024년 교육 만족도 순위",    # 일반 검색
+        ]
+        
+        for i, query in enumerate(test_queries, 1):
+            print(f"\n--- 테스트 {i}: {query} ---")
+            
+            try:
+                results = handler.search_chunks(query)
+                print(f"검색 결과: {len(results)}개")
+                
+                for j, result in enumerate(results):
+                    print(f"  {j+1}. confidence: {result.confidence:.3f}")
+                    print(f"     domain: {result.domain}")
+                    print(f"     content: {result.chunk.content[:100]}...")
+                    
+            except Exception as e:
+                print(f"❌ 테스트 {i} 실패: {e}")
+        
+        print("\n🎉 모든 테스트 완료!")
+        
+    except Exception as e:
+        print(f"\n❌ 핸들러 테스트 실패: {e}")
+        import traceback
+        traceback.print_exc()
