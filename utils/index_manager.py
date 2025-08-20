@@ -1,181 +1,79 @@
-#!/usr/bin/env python3
+# utils/index_manager.py
 """
-벼리톡@경상남도인재개발원 (경상남도인재개발원 RAG 챗봇) - index_manager.py (OpenAI 호환성 수정 버전)
+벼리톡@경상남도인재개발원(BYEOLI-TALK@GNHRD) - 인덱스 관리자 v4.1
+Architecture.md 기준 최적화 버전
 
-IndexManager 싱글톤: 모든 벡터스토어 중앙 관리
-- 앱 기동 시 모든 FAISS 인덱스 사전 로드
-- 저장된 BM25 파일 로드
-- 해시 기반 파일 변경 감지로 핫스왑
-- 전역 공유로 핸들러 간 일관성 보장
-- 메모리 효율적인 단일 인스턴스 관리
+핵심 기능:
+- 6개 도메인 벡터스토어 중앙 관리 (FAISS 기반)
+- 싱글톤 패턴으로 메모리 효율성 극대화
+- 실패한 도메인 제외하고 진행 (Graceful degradation)
+- 간단하고 직관적인 API
+- 파인튜닝 편의성 극대화
 
-🚨 주요 수정사항:
-✅ OpenAIEmbeddings 초기화 방식 수정 (호환성 문제 해결)
-✅ API 키 명시적 전달
-✅ Graceful Degradation 적용
-✅ 에러 처리 강화
-✅ BM25 dict 객체 올바른 추출 (핵심 수정)
-✅ 문서 추출 방식 개선 (안전한 접근)
+작성자: 이다니엘 from 경상남도인재개발원
+최종 수정: 2025-08-21
 """
 
-import hashlib
 import logging
 import threading
 import time
-import pickle
-import traceback
 from pathlib import Path
-from typing import Dict, Optional, Any, List, Tuple
+from typing import Dict, Optional, Any
 from datetime import datetime
-from dataclasses import dataclass, field
 
-# 프로젝트 모듈
-from utils.config import config
-from utils.contracts import HandlerType
-from utils.textifier import TextChunk
-
-# 외부 라이브러리
+from config.config import get_config
 from langchain_community.vectorstores import FAISS
-from rank_bm25 import BM25Okapi
-import numpy as np
 
-# 로깅 설정
+# =============================================================================
+# 🔧 파인튜닝 설정 구역 - 여기서 모든 값 조정 가능
+# =============================================================================
+
+# 임베딩 모델 설정
+EMBEDDING_MODEL = "text-embedding-3-large"
+
+# 도메인 설정 (6개 핸들러)
+SUPPORTED_DOMAINS = [
+    "satisfaction", "cyber", "publish", 
+    "general", "notice", "menu"
+]
+
+# 벡터스토어 경로 매핑 (satisfaction만 예외)
+VECTORSTORE_PATH_MAPPING = {
+    "satisfaction": "vectorstore_unified_satisfaction",
+    "cyber": "vectorstore_cyber",
+    "publish": "vectorstore_publish",
+    "general": "vectorstore_general",
+    "notice": "vectorstore_notice",
+    "menu": "vectorstore_menu"
+}
+
+# 파일명 패턴
+INDEX_FILE_PATTERN = "{domain}_index"  # {domain}_index.faiss, {domain}_index.pkl
+
+# 에러 처리 임계값
+MIN_REQUIRED_DOMAINS = 3  # 최소 3개 도메인 성공해야 서비스 가능
+LOAD_TIMEOUT_SECONDS = 30  # 도메인당 최대 로드 시간
+
+# =============================================================================
+# 🔧 파인튜닝 설정 구역 끝
+# =============================================================================
+
 logger = logging.getLogger(__name__)
 
-# ================================================================
-# 프로젝트 루트 경로 설정
-# ================================================================
-try:
-    ROOT_DIR = Path(__file__).parent.parent.absolute()
-except NameError:
-    ROOT_DIR = Path(".").absolute()
-
-# ================================================================
-# 1. 벡터스토어 메타데이터 클래스
-# ================================================================
-
-@dataclass
-class VectorStoreMetadata:
-    """
-    벡터스토어 메타데이터 및 상태 관리 (BM25 파일 지원)
-    """
-    domain: str
-    vectorstore_base_dir: Path
-    
-    # post_init에서 설정되므로 init=False로 설정
-    vectorstore_path: Path = field(init=False)
-    faiss_path: Path = field(init=False)
-    pkl_path: Path = field(init=False)
-    bm25_path: Path = field(init=False)
-    
-    # 런타임 속성
-    embeddings: Optional[Any] = None  # OpenAIEmbeddings 타입 힌트 제거
-    vectorstore: Optional[FAISS] = None
-    bm25: Optional[BM25Okapi] = None
-    documents: List[TextChunk] = field(default_factory=list)
-    last_loaded: Optional[datetime] = None
-    load_count: int = 0
-    error_count: int = 0
-    last_hash: Optional[str] = None
-    
-    def __post_init__(self):
-        # data_ingestion.py와 동일한 경로 매핑 사용
-        self.vectorstore_path = self._get_vectorstore_path()
-        self.faiss_path = self.vectorstore_path / f"{self.domain}_index.faiss"
-        self.pkl_path = self.vectorstore_path / f"{self.domain}_index.pkl"
-        self.bm25_path = self.vectorstore_path / f"{self.domain}_index.bm25"
-        
-        # ✅ OpenAIEmbeddings 안전한 초기화
-        self.embeddings = self._init_embeddings()
-    
-    def _init_embeddings(self) -> Optional[Any]:
-        """
-        OpenAIEmbeddings 안전한 초기화 (Streamlit Secrets 지원)
-        """
-        try:
-            from langchain_openai import OpenAIEmbeddings
-            
-            # 🚨 핵심 수정: 동적으로 API 키 가져오기
-            api_key = config.get('OPENAI_API_KEY') or config.OPENAI_API_KEY
-            
-            if not api_key:
-                logger.warning(f"⚠️ {self.domain} 도메인: OPENAI_API_KEY가 설정되지 않아 임베딩을 사용할 수 없습니다.")
-                return None
-            
-            # 최소한의 매개변수로 안전한 초기화
-            embeddings = OpenAIEmbeddings(
-                api_key=api_key,
-                model=config.EMBEDDING_MODEL
-            )
-            
-            logger.debug(f"✅ {self.domain} 도메인용 OpenAIEmbeddings 초기화 완료")
-            return embeddings
-            
-        except ImportError as e:
-            logger.error(f"❌ LangChain OpenAI 라이브러리 임포트 실패: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"❌ {self.domain} 도메인 OpenAIEmbeddings 초기화 실패: {e}")
-            return None
-
-    
-    def _get_vectorstore_path(self) -> Path:
-        """도메인별 벡터스토어 경로 매핑"""
-        domain_mapping = {
-            "course_satisfaction": "vectorstore_course_satisfaction",
-            "subject_satisfaction": "vectorstore_subject_satisfaction", 
-            "satisfaction": "vectorstore_unified_satisfaction",
-            "publish": "vectorstore_unified_publish",
-            "general": "vectorstore_general",
-            "cyber": "vectorstore_cyber",
-            "notice": "vectorstore_notice",
-            "menu": "vectorstore_menu"
-        }
-        
-        vectorstore_dir_name = domain_mapping.get(self.domain, f"vectorstore_{self.domain}")
-        return self.vectorstore_base_dir / vectorstore_dir_name
-    
-    def exists(self) -> bool:
-        """필수 파일 존재 여부 확인"""
-        return (
-            self.faiss_path.exists() and 
-            self.pkl_path.exists() and
-            self.vectorstore_path.exists()
-        )
-    
-    def get_file_hash(self) -> str:
-        """파일 변경 감지용 해시 계산"""
-        try:
-            if not self.exists():
-                return ""
-                
-            hash_content = ""
-            
-            # FAISS 파일 해시
-            if self.faiss_path.exists():
-                hash_content += str(self.faiss_path.stat().st_mtime)
-            
-            # PKL 파일 해시
-            if self.pkl_path.exists():
-                hash_content += str(self.pkl_path.stat().st_mtime)
-                
-            # BM25 파일 해시 (선택적)
-            if self.bm25_path.exists():
-                hash_content += str(self.bm25_path.stat().st_mtime)
-            
-            return hashlib.md5(hash_content.encode()).hexdigest()
-        except Exception as e:
-            logger.warning(f"⚠️ {self.domain} 해시 계산 실패: {e}")
-            return ""
-
-# ================================================================
-# 2. IndexManager 싱글톤 클래스
-# ================================================================
+# =============================================================================
+# IndexManager 싱글톤 클래스
+# =============================================================================
 
 class IndexManager:
     """
-    모든 벡터스토어를 관리하는 싱글톤 클래스 (OpenAI 호환성 수정)
+    6개 도메인 벡터스토어 중앙 관리자 (Architecture v4.1)
+    
+    핵심 API:
+    - get_vectorstore(domain): 핸들러들이 사용하는 메인 API
+    - preload_all_indexes(): 앱 시작시 모든 인덱스 로드
+    - health_check(): 시스템 상태 체크
     """
+    
     _instance = None
     _instance_lock = threading.Lock()
     
@@ -185,413 +83,272 @@ class IndexManager:
                 if cls._instance is None:
                     cls._instance = super(IndexManager, cls).__new__(cls)
         return cls._instance
-
+    
     def __init__(self):
         if hasattr(self, '_initialized'):
             return
-            
-        self.metadata: Dict[str, VectorStoreMetadata] = {}
         
-        # ✅ 글로벌 OpenAIEmbeddings 안전한 초기화
-        self.embeddings = self._init_global_embeddings()
-        
-        for domain in config.HANDLERS:
-            self.metadata[domain] = VectorStoreMetadata(
-                domain=domain,
-                vectorstore_base_dir=Path(config.VECTORSTORE_DIR)
-            )
-        
-        logger.info(f"🚀 IndexManager 싱글톤 초기화 완료: {len(self.metadata)}개 도메인")
-        self.load_all_domains()
-        self._initialized = True
-
-    def _init_global_embeddings(self) -> Optional[Any]:
-        """
-        글로벌 OpenAIEmbeddings 안전한 초기화 (Streamlit Secrets 지원)
-        """
-        try:
-            from langchain_openai import OpenAIEmbeddings
-            
-            # 🚨 핵심 수정: 동적으로 API 키 가져오기  
-            api_key = config.get('OPENAI_API_KEY') or config.OPENAI_API_KEY
-            
-            if not api_key:
-                logger.warning("⚠️ OPENAI_API_KEY가 설정되지 않아 임베딩 기능이 제한됩니다.")
-                return None
-            
-            embeddings = OpenAIEmbeddings(
-                api_key=api_key,
-                model=config.EMBEDDING_MODEL
-            )
-            
-            logger.info(f"✅ 글로벌 OpenAIEmbeddings 초기화 완료: {config.EMBEDDING_MODEL}")
-            return embeddings
-            
-        except ImportError as e:
-            logger.error(f"❌ LangChain OpenAI 라이브러리 임포트 실패: {e}")
-            logger.info("🔄 Graceful Degradation: 임베딩 없이 기본 기능으로 동작합니다.")
-            return None
-        except Exception as e:
-            logger.error(f"❌ 글로벌 OpenAIEmbeddings 초기화 실패: {e}")
-            logger.info("🔄 Graceful Degradation: 임베딩 없이 기본 기능으로 동작합니다.")
-            return None
-
-
-    def _load_domain(self, domain: str):
-        """
-        단일 도메인의 벡터스토어를 로드 (수정된 버전)
-        """
-        meta = self.metadata[domain]
-        logger.info(f"🔄 도메인 {domain} 로드 시작...")
-        logger.debug(f" - FAISS 경로: {meta.faiss_path}")
-        logger.debug(f" - PKL 경로: {meta.pkl_path}")
-        logger.debug(f" - BM25 경로: {meta.bm25_path}")
-        try:
-            if not meta.exists():
-                logger.warning(f"⚠️ 도메인 {domain}에 필요한 인덱스 파일이 없습니다.")
-                meta.vectorstore = None
-                meta.bm25 = None
-                return
-            start_time = time.time()
-            # 임베딩 모델 사용
-            embeddings_to_use = meta.embeddings or self.embeddings
-            if not embeddings_to_use:
-                logger.warning(f"⚠️ {domain} 임베딩 모델이 없어 FAISS 로드를 건너뜁니다.")
-                meta.vectorstore = None
-            else:
-                try:
-                    vectorstore_path = meta.vectorstore_path.absolute()
-                    logger.info(f"📍 FAISS 로드 시도:")
-                    logger.info(f" 경로: {vectorstore_path}")
-                    logger.info(f" 인덱스명: {domain}_index")
-                    meta.vectorstore = FAISS.load_local(
-                        str(vectorstore_path),
-                        embeddings_to_use,
-                        index_name=f"{domain}_index",
-                        allow_dangerous_deserialization=True
-                    )
-                    # --- [수정] FAISS 로드 후 인덱스 유효성 검증 로직 추가 ---
-                    if hasattr(meta.vectorstore, 'index') and hasattr(meta.vectorstore.index, 'ntotal'):
-                        doc_count = meta.vectorstore.index.ntotal
-                        # 인덱스에 문서가 없으면 유효하지 않은 것으로 간주
-                        if doc_count == 0:
-                            logger.warning(f"⚠️ {domain} FAISS 인덱스에 문서가 없습니다 (ntotal=0). FAISS를 비활성화합니다.")
-                            meta.vectorstore = None
-                        else:
-                            logger.info(f"✅ {domain} FAISS 로드 성공: {doc_count}개 벡터")
-                    else:
-                        logger.info(f"✅ {domain} FAISS 로드 완료 (ntotal 확인 불가)")
-                except Exception as faiss_error:
-                    logger.error(f"❌ {domain} FAISS 로드 실패: {faiss_error}")
-                    logger.debug(f"상세 오류:\n{traceback.format_exc()}")
-                    meta.vectorstore = None
-            
-            # ✅ 수정: 정확한 문제 해결 - 한글 처리 및 TextChunk 변환 개선
-            meta.documents = []
-            if meta.vectorstore:
-                try:
-                    # 방법 1: _dict 직접 접근 (가장 확실한 방법)
-                    docstore_docs = []
-                    if hasattr(meta.vectorstore, 'docstore') and hasattr(meta.vectorstore.docstore, '_dict'):
-                        raw_documents = list(meta.vectorstore.docstore._dict.values())
-                        logger.info(f"📄 {domain} _dict에서 {len(raw_documents)}개 원본 문서 발견")
-                        docstore_docs = raw_documents
-                    
-                    # 방법 2: index_to_docstore_id 매핑 사용 (폴백)
-                    elif hasattr(meta.vectorstore, 'index_to_docstore_id'):
-                        doc_ids = list(meta.vectorstore.index_to_docstore_id.values())
-                        logger.info(f"📄 {domain} docstore ID 개수: {len(doc_ids)}")
-                        
-                        for doc_id in doc_ids[:100]:  # 최대 100개만 로드
-                            try:
-                                doc = meta.vectorstore.docstore.search(doc_id)
-                                if doc and hasattr(doc, 'page_content'):
-                                    docstore_docs.append(doc)
-                            except Exception as id_error:
-                                logger.debug(f"📄 {domain} docstore ID {doc_id} 검색 실패: {id_error}")
-                                continue
-                        
-                        logger.info(f"📄 {domain} docstore에서 {len(docstore_docs)}개 문서 추출")
-                    
-                    # TextChunk 변환 (개선된 버전)
-                    successful_chunks = 0
-                    for i, doc in enumerate(docstore_docs[:50]):  # 최대 50개로 제한
-                        try:
-                            # Document 객체 검증
-                            if not hasattr(doc, 'page_content'):
-                                logger.debug(f"📄 {domain} 문서 {i}: page_content 속성 없음")
-                                continue
-                            
-                            # 텍스트 추출 및 정리
-                            text = doc.page_content
-                            if not text or not isinstance(text, str) or not text.strip():
-                                logger.debug(f"📄 {domain} 문서 {i}: 빈 텍스트")
-                                continue
-                            
-                            # 메타데이터 안전한 추출
-                            doc_metadata = {}
-                            if hasattr(doc, 'metadata') and doc.metadata:
-                                try:
-                                    doc_metadata = dict(doc.metadata)
-                                except Exception as meta_error:
-                                    logger.debug(f"📄 {domain} 문서 {i} 메타데이터 변환 실패: {meta_error}")
-                                    doc_metadata = {'conversion_error': str(meta_error)}
-                            
-                            # TextChunk 생성 (안전한 방식)
-                            chunk = TextChunk(
-                                text=text.strip(),
-                                metadata=doc_metadata,
-                                source_id=doc_metadata.get('source_id', f'{domain}_{successful_chunks}'),
-                                chunk_index=successful_chunks
-                            )
-                            
-                            meta.documents.append(chunk)
-                            successful_chunks += 1
-                            
-                        except Exception as chunk_error:
-                            logger.warning(f"📄 {domain} 청크 {i} 변환 실패: {chunk_error}")
-                            logger.debug(f"📄 {domain} 청크 변환 상세 오류: {traceback.format_exc()}")
-                            continue
-                    
-                    if meta.documents:
-                        logger.info(f"✅ {domain} 문서 로드 성공: {len(meta.documents)}개 (원본: {len(docstore_docs)}개)")
-                        
-                        # 첫 번째 문서 샘플 로깅 (디버깅용)
-                        if meta.documents:
-                            sample_text = meta.documents[0].text[:100] + "..." if len(meta.documents[0].text) > 100 else meta.documents[0].text
-                            logger.debug(f"📄 {domain} 샘플 텍스트: {sample_text}")
-                    else:
-                        logger.warning(f"⚠️ {domain} TextChunk 변환 결과 없음 (원본: {len(docstore_docs)}개)")
-                        # 폴백: 더미 문서 생성
-                        meta.documents = [TextChunk(
-                            text=f"{domain} 도메인 정보 (변환 실패)",
-                            metadata={'domain': domain, 'conversion_failed': True},
-                            source_id=f'{domain}_dummy',
-                            chunk_index=0
-                        )]
-                    
-                except Exception as doc_error:
-                    logger.error(f"⚠️ {domain} 문서 추출 치명적 실패: {doc_error}")
-                    logger.debug(f"문서 추출 상세 오류:\n{traceback.format_exc()}")
-                    
-                    # 폴백: 더미 문서 생성
-                    meta.documents = [TextChunk(
-                        text=f"{domain} 도메인 정보 (추출 실패)",
-                        metadata={'domain': domain, 'extraction_failed': True},
-                        source_id=f'{domain}_dummy',
-                        chunk_index=0
-                    )]
-            
-            # ✅ 수정: BM25 올바른 로드 방식
-            if meta.bm25_path.exists():
-                try:
-                    with open(meta.bm25_path, 'rb') as f:
-                        bm25_data = pickle.load(f)
-                        
-                        # 🚨 핵심 수정: BM25 객체 타입별 올바른 처리
-                        if isinstance(bm25_data, dict):
-                            # base_loader.py가 저장한 dict 형태에서 실제 BM25 객체 추출
-                            if 'bm25_index' in bm25_data:
-                                meta.bm25 = bm25_data['bm25_index']
-                                logger.info(f"✅ {domain} BM25 dict에서 객체 추출 완료")
-                            else:
-                                logger.warning(f"⚠️ {domain} BM25 dict에 'bm25_index' 키가 없음")
-                                meta.bm25 = None
-                        elif isinstance(bm25_data, tuple):
-                            # 기존 튜플 형태 처리
-                            meta.bm25, _ = bm25_data
-                            logger.info(f"✅ {domain} BM25 튜플에서 객체 추출 완료")
-                        elif isinstance(bm25_data, BM25Okapi):
-                            # 직접 BM25 객체인 경우
-                            meta.bm25 = bm25_data
-                            logger.info(f"✅ {domain} BM25 직접 객체 로드 완료")
-                        else:
-                            logger.warning(f"⚠️ {domain} BM25 알 수 없는 형태: {type(bm25_data)}")
-                            meta.bm25 = None
-                            
-                        # BM25 객체 타입 검증
-                        if meta.bm25 and not isinstance(meta.bm25, BM25Okapi):
-                            logger.warning(f"⚠️ {domain} BM25 객체 타입 오류: {type(meta.bm25)}")
-                            meta.bm25 = None
-                        elif meta.bm25:
-                            logger.info(f"✅ {domain} BM25 검증 완료: {type(meta.bm25).__name__}")
-                            
-                except Exception as bm25_error:
-                    logger.warning(f"⚠️ {domain} BM25 로드 실패: {bm25_error}")
-                    logger.debug(f"BM25 로드 상세 오류:\n{traceback.format_exc()}")
-                    meta.bm25 = None
-            
-            # 상태 업데이트
-            meta.last_loaded = datetime.now()
-            meta.load_count += 1
-            meta.last_hash = meta.get_file_hash()
-            elapsed = time.time() - start_time
-            logger.info(f"✅ {domain} 전체 로드 완료 ({elapsed:.2f}초)")
-            
-        except Exception as e:
-            meta.error_count += 1
-            logger.error(f"❌ {domain} 로드 치명적 오류: {e}")
-            logger.debug(traceback.format_exc())
-            # 폴백 설정
-            meta.vectorstore = None
-            meta.bm25 = None
-            meta.documents = [TextChunk(
-                text=f"{domain} 로드 오류: {str(e)}",
-                metadata={'error': str(e), 'domain': domain},
-                source_id=f'{domain}_error',
-                chunk_index=0
-            )]
-
-    def load_all_domains(self):
-        """모든 도메인 로드"""
-        logger.info(f"🔄 전체 도메인 로드 시작: {list(self.metadata.keys())}")
-        
-        start_time = time.time()
-        loaded_count = 0
-        
-        for domain in self.metadata.keys():
-            try:
-                self._load_domain(domain)
-                loaded_count += 1
-            except Exception as e:
-                logger.error(f"❌ 도메인 {domain} 로드 중 예외 발생: {e}")
-        
-        elapsed = time.time() - start_time
-        logger.info(f"🎉 도메인 로드 완료: {loaded_count}/{len(self.metadata)}개 성공 ({elapsed:.2f}초)")
-
-    def get_vectorstore(self, domain: str) -> Optional[FAISS]:
-        """도메인별 벡터스토어 획득"""
-        if domain not in self.metadata:
-            logger.warning(f"⚠️ 알 수 없는 도메인: {domain}")
-            return None
-        
-        return self.metadata[domain].vectorstore
-
-    def get_bm25(self, domain: str) -> Optional[BM25Okapi]:
-        """도메인별 BM25 인덱스 획득"""
-        if domain not in self.metadata:
-            logger.warning(f"⚠️ 알 수 없는 도메인: {domain}")
-            return None
-        
-        return self.metadata[domain].bm25
-
-    def get_documents(self, domain: str) -> List[TextChunk]:
-        """도메인별 문서 리스트 획득"""
-        if domain not in self.metadata:
-            logger.warning(f"⚠️ 알 수 없는 도메인: {domain}")
-            return []
-        
-        return self.metadata[domain].documents
-
-    def health_check(self) -> Dict[str, Any]:
-        """시스템 상태 체크"""
-        status = {
-            "total_domains": len(self.metadata),
-            "loaded_domains": 0,
-            "failed_domains": 0,
-            "domains_detail": {},
-            "global_embeddings": self.embeddings is not None
+        self.config = get_config()
+        self.vectorstores: Dict[str, Optional[FAISS]] = {}
+        self.load_stats = {
+            "loaded_domains": [],
+            "failed_domains": [],
+            "load_time": 0.0,
+            "last_loaded": None
         }
         
-        for domain, meta in self.metadata.items():
-            domain_status = {
-                "loaded": meta.vectorstore is not None,
-                "bm25_available": meta.bm25 is not None,
-                "documents_count": len(meta.documents),
-                "load_count": meta.load_count,
-                "error_count": meta.error_count,
-                "last_loaded": meta.last_loaded.isoformat() if meta.last_loaded else None
-            }
-            
-            if domain_status["loaded"]:
-                status["loaded_domains"] += 1
-            else:
-                status["failed_domains"] += 1
-            
-            status["domains_detail"][domain] = domain_status
+        # OpenAI 임베딩 초기화
+        self.embeddings = self._init_embeddings()
         
-        return status
+        logger.info(f"✅ IndexManager 싱글톤 초기화 완료: {len(SUPPORTED_DOMAINS)}개 도메인 지원")
+        self._initialized = True
+    
+    def _init_embeddings(self):
+        """OpenAI 임베딩 초기화"""
+        try:
+            import openai
+            
+            api_key = self.config.OPENAI_API_KEY
+            if not api_key:
+                logger.error("❌ OPENAI_API_KEY가 설정되지 않았습니다.")
+                return None
+            
+            # OpenAI 클라이언트로 임베딩 생성
+            client = openai.OpenAI(api_key=api_key)
+            
+            # 테스트 임베딩으로 연결 확인
+            try:
+                test_response = client.embeddings.create(
+                    model=EMBEDDING_MODEL,
+                    input="테스트"
+                )
+                logger.info(f"✅ OpenAI 임베딩 초기화 성공: {EMBEDDING_MODEL}")
+                return client
+            except Exception as test_error:
+                logger.error(f"❌ OpenAI 임베딩 테스트 실패: {test_error}")
+                return None
+                
+        except ImportError:
+            logger.error("❌ openai 라이브러리를 설치해주세요: pip install openai")
+            return None
+        except Exception as e:
+            logger.error(f"❌ OpenAI 임베딩 초기화 실패: {e}")
+            return None
+    
+    def _get_vectorstore_path(self, domain: str) -> Path:
+        """도메인별 벡터스토어 경로 반환"""
+        vectorstore_dir_name = VECTORSTORE_PATH_MAPPING.get(domain, f"vectorstore_{domain}")
+        return Path(self.config.VECTORSTORE_DIR) / vectorstore_dir_name
+    
+    def _load_single_domain(self, domain: str) -> bool:
+        """단일 도메인 벡터스토어 로드"""
+        try:
+            start_time = time.time()
+            
+            # 경로 확인
+            vectorstore_path = self._get_vectorstore_path(domain)
+            faiss_path = vectorstore_path / f"{INDEX_FILE_PATTERN.format(domain=domain)}.faiss"
+            pkl_path = vectorstore_path / f"{INDEX_FILE_PATTERN.format(domain=domain)}.pkl"
+            
+            if not faiss_path.exists() or not pkl_path.exists():
+                logger.warning(f"⚠️ {domain} 인덱스 파일이 없습니다: {vectorstore_path}")
+                return False
+            
+            if not self.embeddings:
+                logger.warning(f"⚠️ {domain} 임베딩이 없어 로드를 건너뜁니다.")
+                return False
+            
+            # FAISS 로드 (langchain 방식)
+            try:
+                # OpenAI 임베딩을 langchain 호환 방식으로 래핑
+                from langchain_openai import OpenAIEmbeddings
+                
+                langchain_embeddings = OpenAIEmbeddings(
+                    api_key=self.config.OPENAI_API_KEY,
+                    model=EMBEDDING_MODEL
+                )
+                
+                vectorstore = FAISS.load_local(
+                    str(vectorstore_path),
+                    langchain_embeddings,
+                    index_name=INDEX_FILE_PATTERN.format(domain=domain),
+                    allow_dangerous_deserialization=True
+                )
+                
+                # 인덱스 유효성 검증
+                if hasattr(vectorstore, 'index') and hasattr(vectorstore.index, 'ntotal'):
+                    doc_count = vectorstore.index.ntotal
+                    if doc_count == 0:
+                        logger.warning(f"⚠️ {domain} 인덱스에 문서가 없습니다.")
+                        return False
+                    else:
+                        logger.info(f"✅ {domain} FAISS 로드 성공: {doc_count}개 벡터")
+                
+                self.vectorstores[domain] = vectorstore
+                
+                elapsed = time.time() - start_time
+                logger.info(f"✅ {domain} 로드 완료 ({elapsed:.2f}초)")
+                return True
+                
+            except Exception as faiss_error:
+                logger.error(f"❌ {domain} FAISS 로드 실패: {faiss_error}")
+                return False
+            
+        except Exception as e:
+            logger.error(f"❌ {domain} 로드 중 예외 발생: {e}")
+            return False
+    
+    def preload_all_indexes(self) -> Dict[str, Any]:
+        """
+        모든 도메인 인덱스 사전 로드
+        
+        Returns:
+            Dict: 로드 결과 정보
+        """
+        logger.info(f"🚀 인덱스 사전 로드 시작: {SUPPORTED_DOMAINS}")
+        start_time = time.time()
+        
+        loaded_domains = []
+        failed_domains = []
+        
+        for domain in SUPPORTED_DOMAINS:
+            try:
+                if self._load_single_domain(domain):
+                    loaded_domains.append(domain)
+                else:
+                    failed_domains.append(domain)
+            except Exception as e:
+                logger.error(f"❌ {domain} 로드 중 예외: {e}")
+                failed_domains.append(domain)
+        
+        # 결과 저장
+        elapsed_time = time.time() - start_time
+        self.load_stats = {
+            "loaded_domains": loaded_domains,
+            "failed_domains": failed_domains,
+            "load_time": elapsed_time,
+            "last_loaded": datetime.now()
+        }
+        
+        # 서비스 가능 여부 체크
+        success_count = len(loaded_domains)
+        total_count = len(SUPPORTED_DOMAINS)
+        
+        if success_count < MIN_REQUIRED_DOMAINS:
+            error_msg = f"서비스 불가: {success_count}/{total_count}개 도메인만 로드됨 (최소 {MIN_REQUIRED_DOMAINS}개 필요)"
+            logger.error(f"❌ {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "loaded_domains": loaded_domains,
+                "failed_domains": failed_domains,
+                "performance": {"load_time": elapsed_time}
+            }
+        
+        logger.info(f"🎉 인덱스 로드 완료: {success_count}/{total_count}개 성공 ({elapsed_time:.2f}초)")
+        return {
+            "success": True,
+            "loaded_domains": loaded_domains,
+            "failed_domains": failed_domains,
+            "performance": {
+                "load_time": elapsed_time,
+                "loaded_count": success_count,
+                "total_count": total_count
+            }
+        }
+    
+    def get_vectorstore(self, domain: str) -> Optional[FAISS]:
+        """
+        도메인별 벡터스토어 반환 (핸들러들이 사용하는 메인 API)
+        
+        Args:
+            domain: 도메인명 (satisfaction, cyber, publish, general, notice, menu)
+            
+        Returns:
+            Optional[FAISS]: 벡터스토어 또는 None
+        """
+        if domain not in SUPPORTED_DOMAINS:
+            logger.warning(f"⚠️ 지원하지 않는 도메인: {domain}")
+            return None
+        
+        return self.vectorstores.get(domain)
+    
+    def health_check(self) -> Dict[str, Any]:
+        """
+        시스템 상태 체크
+        
+        Returns:
+            Dict: 상태 정보
+        """
+        loaded_count = len(self.load_stats["loaded_domains"])
+        total_count = len(SUPPORTED_DOMAINS)
+        
+        # 각 도메인별 상세 상태
+        domain_status = {}
+        for domain in SUPPORTED_DOMAINS:
+            domain_status[domain] = {
+                "loaded": domain in self.load_stats["loaded_domains"],
+                "available": self.vectorstores.get(domain) is not None
+            }
+        
+        return {
+            "service_available": loaded_count >= MIN_REQUIRED_DOMAINS,
+            "loaded_domains": loaded_count,
+            "total_domains": total_count,
+            "success_rate": round(loaded_count / total_count * 100, 1),
+            "embeddings_available": self.embeddings is not None,
+            "last_loaded": self.load_stats["last_loaded"].isoformat() if self.load_stats["last_loaded"] else None,
+            "load_time": self.load_stats["load_time"],
+            "domain_status": domain_status
+        }
+    
+    def reload_all_domains(self) -> Dict[str, Any]:
+        """
+        모든 도메인 재로드 (관리자 수동 버튼용)
+        
+        Returns:
+            Dict: 재로드 결과
+        """
+        logger.info("🔄 수동 인덱스 재로드 시작")
+        
+        # 기존 벡터스토어 정리
+        self.vectorstores.clear()
+        
+        # 재로드 실행
+        return self.preload_all_indexes()
 
-# ================================================================
-# 3. 싱글톤 인스턴스 팩터리 및 호환성 함수
-# ================================================================
+# =============================================================================
+# 전역 인스턴스 및 편의 함수
+# =============================================================================
 
 _index_manager_instance = None
 
 def get_index_manager() -> IndexManager:
-    """IndexManager 싱글톤 인스턴스 획득"""
+    """
+    IndexManager 싱글톤 인스턴스 반환
+    
+    Returns:
+        IndexManager: 인덱스 관리자 인스턴스
+    """
     global _index_manager_instance
     if _index_manager_instance is None:
         _index_manager_instance = IndexManager()
     return _index_manager_instance
 
+# app.py 호환성 함수들
 def preload_all_indexes() -> Dict[str, Any]:
-    """
-    모든 인덱스 사전 로드 (app.py 호환성 개선)
-    
-    Returns:
-        Dict[str, Any]: 로드 결과 정보
-    """
-    logger.info("🚀 인덱스 사전 로드 시작")
-    start_time = time.time()
-    
-    try:
-        manager = get_index_manager()
-        
-        # 재로드 실행
-        manager.load_all_domains()
-        
-        # 상태 체크
-        status = manager.health_check()
-        elapsed_time = time.time() - start_time
-        
-        logger.info(f"📊 인덱스 로드 상태: {status['loaded_domains']}/{status['total_domains']}개 성공")
-        
-        # app.py에서 기대하는 형식으로 반환
-        return {
-            "success": status["loaded_domains"] > 0,
-            "loaded_indexes": list(status["domains_detail"].keys()),
-            "performance": {
-                "load_time": elapsed_time,
-                "loaded_domains": status["loaded_domains"],
-                "total_domains": status["total_domains"]
-            },
-            "error": None if status["loaded_domains"] > 0 else "No domains loaded"
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ 인덱스 사전 로드 실패: {e}")
-        return {
-            "success": False,
-            "loaded_indexes": [],
-            "performance": {},
-            "error": str(e)
-        }
+    """앱 시작시 인덱스 사전 로드"""
+    manager = get_index_manager()
+    return manager.preload_all_indexes()
 
 def index_health_check() -> Dict[str, Any]:
-    """
-    IndexManager 헬스체크 (app.py 호환성 함수)
-    
-    Returns:
-        Dict[str, Any]: 시스템 상태 정보
-    """
-    try:
-        manager = get_index_manager()
-        return manager.health_check()
-    except Exception as e:
-        logger.error(f"❌ 헬스체크 실패: {e}")
-        return {
-            "total_domains": 0,
-            "loaded_domains": 0,
-            "failed_domains": 0,
-            "domains_detail": {},
-            "global_embeddings": False,
-            "error": str(e)
-        }
+    """시스템 상태 체크"""
+    manager = get_index_manager()
+    return manager.health_check()
 
-# ================================================================
-# 4. 테스트 및 검증 
-# ================================================================
+# =============================================================================
+# 모듈 테스트
+# =============================================================================
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
@@ -605,12 +362,23 @@ if __name__ == "__main__":
         assert manager1 is manager2, "싱글톤 패턴 실패"
         print("✅ 싱글톤 패턴 테스트 통과")
         
-        # 상태 체크
-        status = manager1.health_check()
-        print(f"📊 시스템 상태: {status}")
+        # 프리로드 테스트
+        result = preload_all_indexes()
+        print(f"📊 프리로드 결과: {result}")
         
-        print("🎉 모든 테스트 통과!")
+        # 상태 체크 테스트
+        health = index_health_check()
+        print(f"📊 시스템 상태: {health}")
+        
+        # 개별 도메인 테스트
+        for domain in SUPPORTED_DOMAINS:
+            vectorstore = manager1.get_vectorstore(domain)
+            status = "✅ 로드됨" if vectorstore else "❌ 실패"
+            print(f"  {domain}: {status}")
+        
+        print("🎉 모든 테스트 완료!")
         
     except Exception as e:
         print(f"❌ 테스트 실패: {e}")
+        import traceback
         traceback.print_exc()
