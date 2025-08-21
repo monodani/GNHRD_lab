@@ -24,7 +24,7 @@ on:
 env:
   PYTHONPATH: ${{ github.workspace }}
   PYTHONIOENCODING: utf-8
-  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY_DEV }}
 
 jobs:
   build-vectorstores:
