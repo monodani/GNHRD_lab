@@ -25,9 +25,9 @@ from dotenv import load_dotenv
 
 # 환경 변수에서 API 키를 불러옵니다.
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY_DEV")
-
 # 임베딩 모델을 정의합니다.
 EMBEDDING_MODEL = "text-embedding-3-large"
+EMBEDDING_DIMENSION = 3072
 
 # =============================================================================
 # 프로젝트 루트 디렉터리 설정
