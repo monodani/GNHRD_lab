@@ -25,7 +25,7 @@ except ImportError:
 # 프로젝트 모듈 임포트
 from modules.base_loader import BaseLoader
 from utils.textifier import TextChunk
-from utils.config import config
+from config.config import config
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
