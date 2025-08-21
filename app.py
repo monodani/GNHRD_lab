@@ -636,7 +636,7 @@ def render_input_section():
             user_input = st.text_input(
                 "",
                 placeholder="궁금한 것을 물어보세요... (예: 오늘 점심 메뉴는?, 2024년 교육 만족도는?)",
-                label_visibility="collapsed"
+                label_visibility="hidden"
             )
         
         with col2:
