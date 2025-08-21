@@ -16,7 +16,7 @@ Architecture.md 기반 검색 전용 핸들러
 import logging
 from typing import List, Dict, Any, Optional
 from utils.contracts import ChunkResult, TextChunk
-from utils.index_manager import get_index_manager
+from utils.index_manager import index_manager
 from config.thresholds import HANDLER_THRESHOLDS, DEPARTMENT_CONTACTS
 
 # =============================================================================
@@ -75,8 +75,15 @@ class SatisfactionHandler:
         self.threshold = HANDLER_THRESHOLDS["satisfaction"]  # 0.45
         self.department_info = DEPARTMENT_CONTACTS["satisfaction"]
         self.index_manager = get_index_manager()
-        
+    
+        # IndexManager 싱글톤 인스턴스 직접 획득
+        if not hasattr(IndexManager, '_instance') or IndexManager._instance is None:
+            self.index_manager = IndexManager()
+        else:
+            self.index_manager = IndexManager._instance
+    
         logger.info(f"✅ SatisfactionHandler 초기화 완료 (임계값: {self.threshold})")
+
     
     def search_chunks(self, query: str) -> List[ChunkResult]:
         """
