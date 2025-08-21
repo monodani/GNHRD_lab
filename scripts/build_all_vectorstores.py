@@ -73,6 +73,45 @@ def import_loader(module_path: str):
     except Exception as e:
         raise ImportError(f"로더 import 실패: {module_path} - {e}")
 
+def get_domain_stats(domain: str) -> Dict[str, Any]:
+    """도메인별 벡터스토어 통계 자체 계산 (아름다운 경로 매핑)"""
+    
+    # 🗂️ 도메인별 벡터스토어 경로 매핑 (satisfaction, publish는 unified)
+    vectorstore_paths = {
+        'satisfaction': 'vectorstores/vectorstore_unified_satisfaction',
+        'publish': 'vectorstores/vectorstore_unified_publish',
+        'cyber': 'vectorstores/vectorstore_cyber',
+        'general': 'vectorstores/vectorstore_general',
+        'notice': 'vectorstores/vectorstore_notice',
+        'menu': 'vectorstores/vectorstore_menu'
+    }
+    
+    try:
+        path = Path(vectorstore_paths[domain])
+        faiss_file = path / f"{domain}_index.faiss"
+        pkl_file = path / f"{domain}_index.pkl"
+        
+        # 파일 존재 및 크기 확인
+        faiss_exists = faiss_file.exists()
+        pkl_exists = pkl_file.exists()
+        
+        return {
+            'domain': domain,
+            'path': str(path),
+            'vectorstore_exists': faiss_exists and pkl_exists,
+            'faiss_size_mb': round(faiss_file.stat().st_size / (1024*1024), 2) if faiss_exists else 0,
+            'pkl_size_mb': round(pkl_file.stat().st_size / (1024*1024), 2) if pkl_exists else 0,
+            'total_size_mb': round((faiss_file.stat().st_size + pkl_file.stat().st_size) / (1024*1024), 2) if faiss_exists and pkl_exists else 0,
+            'last_modified': datetime.fromtimestamp(faiss_file.stat().st_mtime).isoformat() if faiss_exists else None
+        }
+        
+    except Exception as e:
+        return {
+            'domain': domain,
+            'error': f"통계 수집 실패: {e}",
+            'vectorstore_exists': False
+        }
+
 def build_single_domain(domain: str, loader_class) -> Dict[str, Any]:
     """단일 도메인 빌드"""
     print(f"\n::group::{domain.upper()} 도메인 빌드")
@@ -87,16 +126,16 @@ def build_single_domain(domain: str, loader_class) -> Dict[str, Any]:
         if not success:
             return {'status': 'failed', 'error': 'Build returned False'}
         
-        # 통계 수집 (안전하게)
-        stats = {}
-        try:
-            if hasattr(loader, 'get_stats'):
-                stats = loader.get_stats()
-        except Exception as e:
-            print(f"⚠️ 통계 수집 실패: {e}")
-        
         elapsed = time.time() - start_time
+        
+        # 📊 벡터스토어 통계 자체 계산
+        stats = get_domain_stats(domain)
+        stats['build_time'] = round(elapsed, 2)
+        stats['timestamp'] = datetime.now().isoformat()
+        
         print(f"✅ {domain} 빌드 성공 ({elapsed:.1f}초)")
+        if stats.get('vectorstore_exists'):
+            print(f"📁 벡터스토어 크기: {stats.get('total_size_mb', 0):.1f}MB")
         
         return {
             'status': 'success',
