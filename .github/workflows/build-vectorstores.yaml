@@ -1,18 +1,10 @@
 name: "🔄 벡터스토어 자동 업데이트"
 
-# =============================================================================
-# 🔧 파인튜닝 설정 구역
-# =============================================================================
-
-# 트리거 조건
 on:
-  # data 폴더 변경 시 자동 실행
   push:
     branches: [ operation ]
     paths:
       - 'data/**/*'
-  
-  # 수동 실행 가능
   workflow_dispatch:
     inputs:
       force_rebuild:
@@ -24,136 +16,137 @@ on:
           - 'false'
           - 'true'
 
-# 전역 환경변수
+concurrency:
+  group: vectorstore-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   PYTHONPATH: ${{ github.workspace }}
   PYTHONIOENCODING: utf-8
   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-
-# =============================================================================
 
 jobs:
   build-vectorstores:
     name: 🔨 벡터스토어 빌드
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    
     permissions:
-      contents: write  # 벡터스토어 파일 커밋용
-      
+      contents: write
+
     steps:
-      # 1. 저장소 체크아웃
       - name: 📥 저장소 체크아웃
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      
-      # 2. Python 환경 설정
+
       - name: 🐍 Python 환경 설정
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-      
-      # 3. 의존성 설치
+
       - name: 📦 의존성 설치
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      
-      # 4. 환경 검증
+
       - name: 🔍 환경 검증
         run: |
           echo "=== 환경변수 확인 ==="
           echo "API 키: ${OPENAI_API_KEY:0:10}..."
           echo "Python 경로: $PYTHONPATH"
-          
           echo "=== 디렉터리 구조 ==="
           ls -la
-          echo "data 폴더:" && find data/ -type f | head -10 || echo "data 없음"
-          echo "modules 폴더:" && ls -la modules/ || echo "modules 없음"
-          echo "vectorstores 폴더:" && ls -la vectorstores/ || echo "vectorstores 없음"
-      
-      # 5. 변경사항 확인
+          echo "data 폴더:" && { find data/ -type f | head -10; } || echo "data 없음"
+          echo "modules 폴더:" && { ls -la modules/; } || echo "modules 없음"
+          echo "vectorstores 폴더:" && { ls -la vectorstores/; } || echo "vectorstores 없음"
+
       - name: 📄 변경사항 확인
+        shell: bash
         run: |
           echo "=== 최근 변경된 파일 ==="
-          git diff --name-only HEAD~1 HEAD | grep "^data/" || echo "data 폴더 변경 없음"
-      
-      # 6. 벡터스토어 빌드 실행
+          if git rev-parse HEAD~1 >/dev/null 2>&1; then
+            git diff --name-only HEAD~1 HEAD | grep "^data/" || echo "data 폴더 변경 없음"
+          else
+            echo "이전 커밋 없음 또는 초기 실행"
+            git diff --name-only | grep "^data/" || echo "data 폴더 변경 없음"
+          fi
+
       - name: 🔨 벡터스토어 빌드 실행
+        env:
+          FORCE_REBUILD: ${{ github.event.inputs.force_rebuild || 'false' }}
         run: |
-          echo "🚀 벡터스토어 빌드 시작"
+          echo "🚀 벡터스토어 빌드 시작 (FORCE_REBUILD=$FORCE_REBUILD)"
           python scripts/build_all_vectorstores.py
-      
-      # 7. 빌드 결과 확인
+
       - name: 📊 빌드 결과 확인
         run: |
           echo "=== 생성된 벡터스토어 파일 ==="
-          find vectorstores/ -name "*.faiss" -o -name "*.pkl" | sort || echo "벡터스토어 파일 없음"
-          
+          if [ -d "vectorstores" ]; then
+            find vectorstores/ \( -name "*.faiss" -o -name "*.pkl" \) -type f | sort || true
+          else
+            echo "vectorstores 폴더 없음"
+          fi
+
           echo "=== 빌드 보고서 ==="
           if [ -f "vectorstore_build_report.json" ]; then
             cat vectorstore_build_report.json | python -m json.tool
           else
             echo "빌드 보고서 없음"
           fi
-          
+
           echo "=== 디스크 사용량 ==="
           du -sh vectorstores/*/ 2>/dev/null || echo "벡터스토어 폴더 없음"
-      
-      # 8. 변경사항 커밋
+
       - name: 📝 벡터스토어 변경사항 커밋
+        shell: bash
         run: |
-          # Git 사용자 설정
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action Bot"
-          
-          # 변경사항 추가
-          git add vectorstores/
+
+          git add vectorstores/ || true
           git add vectorstore_build_report.json || true
-          
-          # 변경사항 확인 및 커밋
+
           if git diff --staged --quiet; then
             echo "✅ 벡터스토어 변경사항 없음"
           else
-            # 커밋 메시지 생성
+            if git rev-parse HEAD~1 >/dev/null 2>&1; then
+              CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep "^data/" | tr '\n' ' ')
+            else
+              CHANGED_FILES=$(git diff --name-only | grep "^data/" | tr '\n' ' ')
+            fi
+
             TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep "^data/" | tr '\n' ' ' || echo "수동 실행")
-            
-            if [ "$CHANGED_FILES" != "수동 실행" ]; then
+            if [ -n "$CHANGED_FILES" ]; then
               COMMIT_MSG="🤖 Auto-update vectorstores - ${TIMESTAMP}
 
 Changed data files: ${CHANGED_FILES}"
             else
               COMMIT_MSG="🤖 Manual vectorstore rebuild - ${TIMESTAMP}"
             fi
-            
+
+            # 경합 최소화
+            git pull --rebase origin "${GITHUB_REF_NAME:-operation}" || true
             git commit -m "$COMMIT_MSG"
             git push
-            
             echo "✅ 벡터스토어 업데이트 커밋 완료"
           fi
-      
-      # # 9. 빌드 아티팩트 업로드
-      # - name: 📁 빌드 아티팩트 업로드
-      #   if: always()
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: vectorstore-build-report
-      #     path: |
-      #       vectorstore_build_report.json
-      #     retention-days: 7
-      
-      # # 10. 성공 알림
-      # - name: 🎉 빌드 성공 알림
-      #   if: success()
-      #   run: |
-      #     echo "::notice title=벡터스토어 빌드 성공::모든 벡터스토어가 성공적으로 업데이트되었습니다."
-      
-      # # 11. 실패 알림
-      # - name: ❌ 빌드 실패 알림
-      #   if: failure()
-      #   run: |
-      #     echo "::error title=벡터스토어 빌드 실패::빌드 과정에서 오류가 발생했습니다. 로그를 확인해주세요."
+
+      - name: 📁 빌드 아티팩트 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vectorstore-build-report
+          path: |
+            vectorstore_build_report.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: 🎉 빌드 성공 알림
+        if: success()
+        run: echo "::notice title=벡터스토어 빌드 성공::모든 벡터스토어가 성공적으로 업데이트되었습니다."
+
+      - name: ❌ 빌드 실패 알림
+        if: failure()
+        run: echo "::error title=벡터스토어 빌드 실패::빌드 과정에서 오류가 발생했습니다. 로그를 확인해주세요."
