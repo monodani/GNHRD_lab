@@ -1,17 +1,14 @@
 name: "벡터스토어 자동 업데이트"
-
-# =============================================================================
+# =================
 # 파인튜닝 설정 구역
-# =============================================================================
-
+# =================
 # 트리거 조건
 on:
   # data 폴더 변경 시 자동 실행
   push:
     branches: [ operation ]
     paths:
-      - 'data/**/*'
-  
+      - 'data/**'
   # 수동 실행 가능
   workflow_dispatch:
     inputs:
@@ -23,15 +20,12 @@ on:
         options:
           - 'false'
           - 'true'
-
 # 전역 환경변수
 env:
   PYTHONPATH: ${{ github.workspace }}
   PYTHONIOENCODING: utf-8
   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-
-# =============================================================================
-
+# =================
 jobs:
   build-vectorstores:
     name: "벡터스토어 빌드"
@@ -65,11 +59,15 @@ jobs:
       # 4. 환경 검증
       - name: "환경 검증"
         run: |
-          echo "=== 환경변수 확인 ==="
-          echo "API 키: ${OPENAI_API_KEY:0:10}..."
+          echo "= 환경변수 확인 ="
+          if [ -n "$OPENAI_API_KEY" ]; then
+            echo "API 키: ${OPENAI_API_KEY:0:10}..."
+          else
+            echo "API 키 없음"
+          fi
           echo "Python 경로: $PYTHONPATH"
           
-          echo "=== 디렉터리 구조 ==="
+          echo "= 디렉터리 구조 ="
           ls -la
           echo "data 폴더:" && find data/ -type f | head -10 || echo "data 없음"
           echo "modules 폴더:" && ls -la modules/ || echo "modules 없음"
@@ -78,8 +76,8 @@ jobs:
       # 5. 변경사항 확인
       - name: "변경사항 확인"
         run: |
-          echo "=== 최근 변경된 파일 ==="
-          git diff --name-only HEAD~1 HEAD | grep "^data/" || echo "data 폴더 변경 없음"
+          echo "= 최근 변경된 파일 ="
+          git diff --name-only HEAD~1 HEAD 2>/dev/null | grep "^data/" || echo "data 폴더 변경 없음"
       
       # 6. 벡터스토어 빌드 실행
       - name: "벡터스토어 빌드 실행"
@@ -90,17 +88,17 @@ jobs:
       # 7. 빌드 결과 확인
       - name: "빌드 결과 확인"
         run: |
-          echo "=== 생성된 벡터스토어 파일 ==="
-          find vectorstores/ -name "*.faiss" -o -name "*.pkl" | sort || echo "벡터스토어 파일 없음"
+          echo "= 생성된 벡터스토어 파일 ="
+          find vectorstores/ \( -name "*.faiss" -o -name "*.pkl" \) | sort || echo "벡터스토어 파일 없음"
           
-          echo "=== 빌드 보고서 ==="
+          echo "= 빌드 보고서 ="
           if [ -f "vectorstore_build_report.json" ]; then
             cat vectorstore_build_report.json | python -m json.tool
           else
             echo "빌드 보고서 없음"
           fi
           
-          echo "=== 디스크 사용량 ==="
+          echo "= 디스크 사용량 ="
           du -sh vectorstores/*/ 2>/dev/null || echo "벡터스토어 폴더 없음"
       
       # 8. 변경사항 커밋
@@ -120,11 +118,10 @@ jobs:
           else
             # 커밋 메시지 생성
             TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep "^data/" | tr '\n' ' ' || echo "수동 실행")
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep "^data/" | tr '\n' ' ' || echo "수동 실행")
             
             if [ "$CHANGED_FILES" != "수동 실행" ]; then
               COMMIT_MSG="Auto-update vectorstores - ${TIMESTAMP}
-
 Changed data files: ${CHANGED_FILES}"
             else
               COMMIT_MSG="Manual vectorstore rebuild - ${TIMESTAMP}"
