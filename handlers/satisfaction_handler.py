@@ -16,7 +16,7 @@ Architecture.md 기반 검색 전용 핸들러
 import logging
 from typing import List, Dict, Any, Optional
 from utils.contracts import ChunkResult, TextChunk
-from utils.index_manager import index_manager
+from utils.index_manager import get_index_manager
 from config.thresholds import HANDLER_THRESHOLDS, DEPARTMENT_CONTACTS
 
 # =============================================================================
