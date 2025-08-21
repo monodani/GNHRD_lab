@@ -22,7 +22,7 @@ from calendar import timegm
 # 프로젝트 모듈 임포트
 from modules.base_loader import BaseLoader
 from utils.textifier import TextChunk
-from utils.config import config
+from config.config import config
 
 # 외부 라이브러리
 import requests
