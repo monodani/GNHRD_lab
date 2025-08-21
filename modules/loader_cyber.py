@@ -60,9 +60,9 @@ class TextChunk:
 class CyberLoader:
     def __init__(self):
         # API 키 및 임베딩
-        self.api_key = os.getenv("OPENAI_API_KEY_DEV")
+        self.api_key = os.getenv("OPENAI_API_KEY")
         if not self.api_key:
-            raise ValueError("OPENAI_API_KEY_DEV 환경변수가 필요합니다")
+            raise ValueError("OPENAI_API_KEY 환경변수가 필요합니다")
         
         self.embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL, api_key=self.api_key)
         
