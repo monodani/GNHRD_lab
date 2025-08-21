@@ -22,7 +22,7 @@ from calendar import timegm
 # 프로젝트 모듈 임포트
 from modules.base_loader import BaseLoader
 from utils.textifier import TextChunk
-from config.config import OPENAI_API_KEY, EMBEDDING_MODEL
+from config.config import OPENAI_API_KEY_DEV, EMBEDDING_MODEL
 
 # 외부 라이브러리
 import requests
