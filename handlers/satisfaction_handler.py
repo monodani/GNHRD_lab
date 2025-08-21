@@ -96,18 +96,47 @@ class SatisfactionHandler:
         logger.info(f"✅ SatisfactionHandler 초기화 완료 (임계값: {self.threshold})")
     
     def _load_vectorstore(self):
-        """벡터스토어 로드 - 안전한 방식"""
+        """벡터스토어 로드 - 진단 정보 포함"""
         if not self.index_manager:
+            logger.error("❌ IndexManager가 None입니다")
             return
         
         try:
+            # 상세 진단 정보 출력
+            logger.info(f"🔍 {self.domain} 벡터스토어 로드 시도...")
+            
+            # IndexManager 상태 체크
+            health = self.index_manager.health_check()
+            logger.info(f"📊 IndexManager 상태: {health}")
+            
+            # 벡터스토어 획득 시도
             self.vectorstore = self.index_manager.get_vectorstore(self.domain)
+            
             if self.vectorstore:
                 logger.info(f"✅ {self.domain} 벡터스토어 로드 성공")
+                # 벡터스토어 정보 출력
+                if hasattr(self.vectorstore, 'index') and hasattr(self.vectorstore.index, 'ntotal'):
+                    doc_count = self.vectorstore.index.ntotal
+                    logger.info(f"📄 {self.domain} 문서 개수: {doc_count}")
             else:
-                logger.warning(f"⚠️ {self.domain} 벡터스토어 로드 실패")
+                logger.error(f"❌ {self.domain} 벡터스토어가 None입니다")
+                logger.info("🔧 IndexManager preload 시도...")
+                
+                # 수동으로 preload 시도
+                preload_result = self.index_manager.preload_all_indexes()
+                logger.info(f"📊 Preload 결과: {preload_result}")
+                
+                # 재시도
+                self.vectorstore = self.index_manager.get_vectorstore(self.domain)
+                if self.vectorstore:
+                    logger.info(f"✅ {self.domain} 재로드 성공!")
+                else:
+                    logger.error(f"❌ {self.domain} 재로드도 실패")
+                    
         except Exception as e:
             logger.error(f"❌ 벡터스토어 로드 오류: {e}")
+            import traceback
+            traceback.print_exc()
             self.vectorstore = None
     
     def search_chunks(self, query: str) -> List[ChunkResult]:
@@ -194,11 +223,31 @@ class SatisfactionHandler:
             return []
     
     def _is_ready(self) -> bool:
-        """핸들러 준비 상태 체크"""
-        return (
+        """핸들러 준비 상태 체크 - 상세 진단"""
+        ready = (
             self.index_manager is not None and 
             self.vectorstore is not None
         )
+        
+        if not ready:
+            logger.error("❌ 만족도 핸들러 준비 실패:")
+            logger.error(f"   - IndexManager: {'✅' if self.index_manager else '❌'}")
+            logger.error(f"   - Vectorstore: {'✅' if self.vectorstore else '❌'}")
+            
+            # 추가 진단 정보
+            if self.index_manager:
+                try:
+                    health = self.index_manager.health_check()
+                    logger.error(f"   - 시스템 상태: {health.get('service_available', False)}")
+                    logger.error(f"   - 로드된 도메인: {health.get('loaded_domains', 0)}/{health.get('total_domains', 6)}")
+                    
+                    # satisfaction 도메인 상세 상태
+                    domain_status = health.get('domain_status', {}).get('satisfaction', {})
+                    logger.error(f"   - satisfaction 상태: {domain_status}")
+                except Exception as e:
+                    logger.error(f"   - 상태 체크 실패: {e}")
+        
+        return ready
     
     def _analyze_query_type(self, query: str) -> Optional[str]:
         """쿼리 타입 분석 - 단순하고 명확하게"""
