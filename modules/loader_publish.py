@@ -30,7 +30,7 @@ except ImportError:
 
 # 경로 설정
 SOURCE_DIR = "data/publish"
-VECTORSTORE_DIR = "vectorstores/vectorstore_publish"
+VECTORSTORE_DIR = "vectorstores/vectorstore_unified_publish"
 INDEX_NAME = "publish_index"
 
 # 파일 설정
