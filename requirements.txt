@@ -1,42 +1,87 @@
-# Core dependencies
-streamlit==1.39.0
-python-dotenv>=1.0.0
-pydantic==2.9.2  # v2 명시적 지정
-pydantic-core==2.23.4
+# 벼리톡@경상남도인재개발원(BYEOLI-TALK@GNHRD) 
+# Architecture v4.1 기준 필수 패키지 목록
+# Python 3.12+ 지원, 호환 버전 사용
 
-# LangChain & AI
-langchain>=0.3.0
-langchain-community>=0.0.20
-langchain-core>=0.3.0
-langchain-openai>=0.2.0
+# ====================================
+# 🎨 Streamlit UI 프레임워크
+# ====================================
+streamlit~=1.39.0
 
-openai>=1.0.0
-faiss-cpu>=1.7.0
-rank_bm25==0.2.2
-tiktoken==0.8.0
+# ====================================
+# 🤖 AI/ML 핵심 패키지
+# ====================================
+# OpenAI API 클라이언트
+openai~=1.51.0
 
-# Data processing
-pandas>=2.0.0
-numpy==1.26.4
-chardet==5.2.0
-PyPDF2>=3.0.0
+# LangChain 생태계 (벡터스토어 + 임베딩)
+langchain~=0.3.0
+langchain-community~=0.3.0
+langchain-openai~=0.2.0
 
+# 벡터 검색 엔진 (CPU 버전)
+faiss-cpu~=1.8.0
 
-# OCR (optional - comment out if not using menu OCR)
-# pytesseract==0.3.13
-Pillow>=10.0.0
+# ====================================
+# 📊 데이터 처리
+# ====================================
+# 데이터 분석 및 처리
+pandas~=2.2.0
+numpy~=1.26.0
 
-# Utilities
-colorama==0.4.6
-tenacity==9.0.0
-tqdm==4.67.0
-requests>=2.31.0
+# ====================================
+# 🔥 Firebase/Firestore (피드백 시스템)
+# ====================================
+# Google Cloud Firestore 클라이언트
+google-cloud-firestore~=2.18.0
 
-# Type hints
-typing-extensions==4.12.2
+# ====================================
+# 🔧 유틸리티 및 설정 관리
+# ====================================
+# 환경변수 관리
+python-dotenv~=1.0.0
 
-# For schema validation
-jsonschema==4.23.0
+# 데이터 검증 및 직렬화
+pydantic~=2.9.0
 
+# HTTP 클라이언트 (OpenAI 의존성)
+httpx~=0.27.0
 
+# JSON 웹 토큰 (Google 인증)
+PyJWT~=2.9.0
 
+# ====================================
+# 📈 시각화 (관리자 대시보드)
+# ====================================
+# 인터랙티브 차트
+plotly~=5.24.0
+
+# ====================================
+# 🛠️ 병렬 처리 및 스레딩
+# ====================================
+# Python 표준 라이브러리 (별도 설치 불필요)
+# - concurrent.futures.ThreadPoolExecutor
+# - threading.Lock
+# - uuid
+# - datetime
+# - logging
+# - pathlib
+# - json
+# - typing
+
+# ====================================
+# 📝 선택적 의존성 (데이터 처리용)
+# ====================================
+# Excel 파일 처리 (data_ingestion.py용)
+openpyxl~=3.1.0
+
+# 문서 처리 (향후 확장용)
+# python-docx~=1.1.0
+# PyPDF2~=3.0.0
+
+# ====================================
+# 🔍 패키지 정보
+# ====================================
+# 총 패키지 수: 12개 (핵심 패키지만)
+# 예상 설치 크기: ~800MB
+# 호환성: Python 3.12+, Windows/Mac/Linux
+# Streamlit Cloud: ✅ 모든 패키지 지원
