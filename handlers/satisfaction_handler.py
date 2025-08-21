@@ -278,9 +278,9 @@ class SatisfactionHandler:
         
         # 만족도 핸들러 특화 정보 추가
         base_metadata.update({
-            "department": self.department_info["department"],
-            "contact": self.department_info["contact"], 
-            "description": self.department_info["description"],
+            "department": self.department_info("department", "평가분석담당"),
+            "contact": self.department_info("contact", "055-254-2021"), 
+            "description": self.department_info("description", "교육 만족도 분석"),
             "rank": rank,
             "distance_score": distance_score,
             "similarity_score": similarity_score,
