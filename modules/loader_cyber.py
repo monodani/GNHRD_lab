@@ -18,7 +18,7 @@ from datetime import datetime
 # 프로젝트 모듈 임포트
 from modules.base_loader import BaseLoader
 from utils.textifier import TextChunk
-from config import config
+from config.config import OPENAI_API_KEY, EMBEDDING_MODEL
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
