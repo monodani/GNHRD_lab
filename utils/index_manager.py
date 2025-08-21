@@ -41,7 +41,7 @@ SUPPORTED_DOMAINS = [
 VECTORSTORE_PATH_MAPPING = {
     "satisfaction": "vectorstore_unified_satisfaction",
     "cyber": "vectorstore_cyber",
-    "publish": "vectorstore_publish",
+    "publish": "vectorstore_unified_publish",
     "general": "vectorstore_general",
     "notice": "vectorstore_notice",
     "menu": "vectorstore_menu"
