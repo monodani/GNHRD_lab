@@ -136,24 +136,24 @@ Changed data files: ${CHANGED_FILES}"
             echo "✅ 벡터스토어 업데이트 커밋 완료"
           fi
       
-      # 9. 빌드 아티팩트 업로드
-      - name: 📁 빌드 아티팩트 업로드
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: vectorstore-build-report
-          path: |
-            vectorstore_build_report.json
-          retention-days: 7
+      # # 9. 빌드 아티팩트 업로드
+      # - name: 📁 빌드 아티팩트 업로드
+      #   if: always()
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: vectorstore-build-report
+      #     path: |
+      #       vectorstore_build_report.json
+      #     retention-days: 7
       
-      # 10. 성공 알림
-      - name: 🎉 빌드 성공 알림
-        if: success()
-        run: |
-          echo "::notice title=벡터스토어 빌드 성공::모든 벡터스토어가 성공적으로 업데이트되었습니다."
+      # # 10. 성공 알림
+      # - name: 🎉 빌드 성공 알림
+      #   if: success()
+      #   run: |
+      #     echo "::notice title=벡터스토어 빌드 성공::모든 벡터스토어가 성공적으로 업데이트되었습니다."
       
-      # 11. 실패 알림
-      - name: ❌ 빌드 실패 알림
-        if: failure()
-        run: |
-          echo "::error title=벡터스토어 빌드 실패::빌드 과정에서 오류가 발생했습니다. 로그를 확인해주세요."
+      # # 11. 실패 알림
+      # - name: ❌ 빌드 실패 알림
+      #   if: failure()
+      #   run: |
+      #     echo "::error title=벡터스토어 빌드 실패::빌드 과정에서 오류가 발생했습니다. 로그를 확인해주세요."
