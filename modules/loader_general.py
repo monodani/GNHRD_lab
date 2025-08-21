@@ -1,283 +1,322 @@
 #!/usr/bin/env python3
 """
-경상남도인재개발원 RAG 챗봇 - 일반 도메인 로더 (BaseLoader 패턴 준수)
+경상남도인재개발원 RAG 챗봇 - 일반 정보 벡터스토어 로더
 
-notice 로더 패턴을 따라 완전히 수정됨:
-- process_domain_data(self) 시그니처로 변경
-- 원본 파일 직접 읽기 로직 추가
-- BaseLoader 표준 패턴 완전 준수
-- 기존 템플릿 시스템 유지
+학칙/규정/연락처 PDF+CSV → FAISS 벡터스토어 생성
 """
 
+import os
 import logging
 import pandas as pd
+import hashlib
+import time
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from datetime import datetime
 
-# PyPDF2 직접 임포트 (PDFProcessor 의존성 제거)
+from config.config import EMBEDDING_MODEL
+from langchain_community.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings
+
+# PDF 처리
 try:
     from PyPDF2 import PdfReader
     PDF_AVAILABLE = True
 except ImportError:
     PDF_AVAILABLE = False
 
-# 프로젝트 모듈 임포트
-from modules.base_loader import BaseLoader
-from utils.textifier import TextChunk
-from config.config import OPENAI_API_KEY_DEV, EMBEDDING_MODEL
+# =============================================================================
+# 🔧 파인튜닝 설정
+# =============================================================================
 
-# 로깅 설정
+# 경로 설정
+SOURCE_DIR = "data/general"
+VECTORSTORE_DIR = "vectorstores/vectorstore_general"
+INDEX_NAME = "general_index"
+
+# 파일 설정
+HAKCHIK_PDF = "hakchik.pdf"
+OPERATION_PDF = "operation_test.pdf"
+TELEPHONE_CSV = "task_telephone.csv"
+CSV_ENCODINGS = ['utf-8', 'cp949', 'euc-kr']
+
+# 필수 컬럼
+TELEPHONE_COLUMNS = ['부서', '직책', '전화번호', '담당업무']
+
+# 텍스트 처리
+MIN_PAGE_TEXT_LENGTH = 50
+CHUNK_PREFIX_REGULATIONS = "[통합규정문서]"
+CHUNK_PREFIX_OPERATIONS = "[운영평가계획]"
+
+# 템플릿
+TELEPHONE_TEMPLATE = """담당업무: {담당업무}
+  - 담당자: {부서} {직책}
+  - 연락처: {전화번호}
+"""
+
+# =============================================================================
+
 logger = logging.getLogger(__name__)
 
 
-class GeneralLoader(BaseLoader):
-    """
-    일반 도메인 로더 - BaseLoader 표준 패턴 준수
-    
-    처리 대상:
-    - data/general/hakchik.pdf (학칙+감점기준+전결규정 통합문서)
-    - data/general/operation_test.pdf (운영/평가 계획)
-    - data/general/task_telephone.csv (업무담당자 연락처)
-    
-    특징:
-    - notice 로더와 동일한 process_domain_data(self) 시그니처
-    - 원본 파일 직접 읽기
-    - PyPDF2 직접 사용 (PDFProcessor 의존성 제거)
-    - 기존 코랩 템플릿 완벽 보존
-    - 해시 기반 증분 빌드 지원
-    """
-    
-    def __init__(self):
-        super().__init__(
-            domain="general",
-            source_dir=config.ROOT_DIR / "data" / "general",
-            vectorstore_dir=config.ROOT_DIR / "vectorstores" / "vectorstore_general",
-            index_name="general_index"
-        )
+class TextChunk:
+    def __init__(self, text: str, source_id: str, metadata: Dict[str, Any] = None):
+        self.text = text
+        self.source_id = source_id
+        self.metadata = metadata or {}
 
+
+class GeneralLoader:
+    def __init__(self):
+        # API 키 및 임베딩
+        self.api_key = os.getenv("OPENAI_API_KEY_DEV")
+        if not self.api_key:
+            raise ValueError("OPENAI_API_KEY_DEV 환경변수가 필요합니다")
         
-        # 처리할 파일 정의
-        self.hakchik_file = self.source_dir / "hakchik.pdf"
-        self.operation_file = self.source_dir / "operation_test.pdf"
-        self.telephone_file = self.source_dir / "task_telephone.csv"
+        self.embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL, api_key=self.api_key)
+        
+        # 경로 설정
+        root = Path(__file__).parent.parent
+        self.source_dir = root / SOURCE_DIR
+        self.vectorstore_dir = root / VECTORSTORE_DIR
+        self.vectorstore_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"GeneralLoader 초기화: {EMBEDDING_MODEL}")
     
-    def process_domain_data(self) -> List[TextChunk]:
-        """
-        BaseLoader 인터페이스 구현: 일반 도메인 데이터 처리
-        
-        ✅ notice 로더와 동일한 시그니처: process_domain_data(self)
-        """
-        all_chunks = []
-        
-        # 1. PDF 파일들 처리
-        pdf_chunks = self._process_pdf_files()
-        all_chunks.extend(pdf_chunks)
-        
-        # 2. CSV 파일 처리 (업무담당자 연락처)
-        csv_chunks = self._process_telephone_csv()
-        all_chunks.extend(csv_chunks)
-        
-        logger.info(f"✅ 일반 도메인 통합 처리 완료: PDF {len(pdf_chunks)}개 + CSV {len(csv_chunks)}개 = 총 {len(all_chunks)}개 청크")
-        
-        return all_chunks
+    def build_vectorstore(self, force_rebuild: bool = False) -> bool:
+        """벡터스토어 빌드"""
+        try:
+            if not force_rebuild and not self._needs_rebuild():
+                logger.info("벡터스토어가 최신상태입니다")
+                return True
+            
+            logger.info("벡터스토어 빌드 시작...")
+            start_time = time.time()
+            
+            # 데이터 처리
+            chunks = self._process_data()
+            
+            # FAISS 생성
+            texts = [chunk.text for chunk in chunks]
+            metadatas = [chunk.metadata for chunk in chunks]
+            
+            vectorstore = FAISS.from_texts(texts, self.embeddings, metadatas)
+            vectorstore.save_local(str(self.vectorstore_dir), INDEX_NAME)
+            
+            # 해시 저장
+            self._save_hash()
+            
+            elapsed = time.time() - start_time
+            logger.info(f"빌드 완료: {len(chunks)}개 청크, {elapsed:.1f}초")
+            return True
+            
+        except Exception as e:
+            logger.error(f"빌드 실패: {e}")
+            raise
     
-    def _process_pdf_files(self) -> List[TextChunk]:
-        """PDF 파일들 직접 읽기 및 처리 (PyPDF2 직접 사용)"""
+    def _process_data(self) -> List[TextChunk]:
+        """PDF와 CSV 파일들 처리"""
         chunks = []
         
-        if not PDF_AVAILABLE:
-            logger.error("❌ PyPDF2 라이브러리가 설치되지 않았습니다")
-            return chunks
-        
+        # PDF 파일들 처리
         pdf_files = [
-            (self.hakchik_file, "regulations", "통합규정문서"),
-            (self.operation_file, "operations", "운영평가계획")
+            (HAKCHIK_PDF, "regulations", CHUNK_PREFIX_REGULATIONS),
+            (OPERATION_PDF, "operations", CHUNK_PREFIX_OPERATIONS)
         ]
         
-        for pdf_file, category, doc_type in pdf_files:
-            if not pdf_file.exists():
-                logger.warning(f"PDF 파일이 없습니다: {pdf_file}")
-                continue
-            
-            try:
-                logger.info(f"📄 PDF 처리 시작: {pdf_file}")
-                
-                # PyPDF2로 직접 PDF 읽기
-                with open(pdf_file, 'rb') as file:
-                    pdf_reader = PdfReader(file)
-                    total_pages = len(pdf_reader.pages)
-                    
-                    logger.info(f"PDF 총 페이지 수: {total_pages}")
-                    
-                    for page_num, page in enumerate(pdf_reader.pages, 1):
-                        try:
-                            # 페이지 텍스트 추출
-                            page_text = page.extract_text()
-                            
-                            if not page_text or len(page_text.strip()) < 50:
-                                logger.debug(f"페이지 {page_num}: 텍스트가 너무 짧거나 없음 (건너뜀)")
-                                continue
-                            
-                            # 텍스트 청크 생성
-                            chunk_text = f"[{doc_type}] 페이지 {page_num}\n\n{page_text.strip()}"
-                            
-                            # 메타데이터 생성
-                            metadata = {
-                                'source_file': pdf_file.name,
-                                'file_type': 'pdf',
-                                'category': category,
-                                'doc_type': doc_type,
-                                'domain': 'general',
-                                'page_number': page_num,
-                                'total_pages': total_pages,
-                                'char_count': len(page_text),
-                                'cache_ttl': 2592000,  # 30일 TTL
-                                'processing_date': datetime.now().isoformat(),
-                                'chunk_type': 'document'
-                            }
-                            
-                            chunk = TextChunk(
-                                text=chunk_text,
-                                source_id=f'general/{pdf_file.name}#page_{page_num}',
-                                metadata=metadata
-                            )
-                            
-                            chunks.append(chunk)
-                            
-                        except Exception as e:
-                            logger.error(f"페이지 {page_num} 처리 실패: {e}")
-                            continue
-                
-                logger.info(f"✅ {pdf_file.name} 처리 완료: {len([c for c in chunks if c.metadata.get('source_file') == pdf_file.name])}개 청크")
-                
-            except Exception as e:
-                logger.error(f"❌ PDF 파일 처리 실패 ({pdf_file}): {e}")
-                continue
+        for filename, category, prefix in pdf_files:
+            pdf_chunks = self._process_pdf(filename, category, prefix)
+            chunks.extend(pdf_chunks)
         
+        # CSV 파일 처리
+        csv_chunks = self._process_telephone_csv()
+        chunks.extend(csv_chunks)
+        
+        if not chunks:
+            raise ValueError("처리할 데이터가 없습니다")
+        
+        logger.info(f"데이터 처리 완료: {len(chunks)}개 청크")
         return chunks
     
-    def _process_telephone_csv(self) -> List[TextChunk]:
-        """업무담당자 연락처 CSV 직접 읽기 및 처리 (기존 코랩 템플릿 보존)"""
+    def _process_pdf(self, filename: str, category: str, prefix: str) -> List[TextChunk]:
+        """PDF 파일 처리"""
         chunks = []
+        pdf_file = self.source_dir / filename
         
-        if not self.telephone_file.exists():
-            logger.warning(f"연락처 파일이 없습니다: {self.telephone_file}")
+        if not pdf_file.exists():
+            logger.warning(f"PDF 파일 없음: {filename}")
+            return chunks
+        
+        if not PDF_AVAILABLE:
+            logger.error(f"PyPDF2 라이브러리가 필요합니다")
             return chunks
         
         try:
-            logger.info(f"📞 연락처 CSV 처리 시작: {self.telephone_file}")
-            
-            # CSV 인코딩 자동 감지 및 읽기
-            df = self._read_csv_with_encoding(self.telephone_file)
-            
-            if df is None:
-                return chunks
-            
-            logger.info(f"📄 연락처 데이터: {len(df)}행 로드됨")
-            
-            # 각 행을 기존 코랩 템플릿으로 변환
-            for idx, row in df.iterrows():
-                try:
-                    # 기존 코랩 템플릿 완벽 보존
-                    chunk_text = (
-                        f"담당업무: {row['담당업무']}\n"
-                        f"  - 담당자: {row['부서']} {row['직책']}\n"
-                        f"  - 연락처: {row['전화번호']}\n"
+            with open(pdf_file, 'rb') as file:
+                pdf_reader = PdfReader(file)
+                total_pages = len(pdf_reader.pages)
+                
+                for page_num, page in enumerate(pdf_reader.pages, 1):
+                    page_text = page.extract_text()
+                    
+                    if len(page_text.strip()) < MIN_PAGE_TEXT_LENGTH:
+                        continue
+                    
+                    chunk = self._create_pdf_chunk(
+                        page_text, filename, category, prefix, 
+                        page_num, total_pages
                     )
-                    
-                    # 메타데이터 생성
-                    metadata = {
-                        'source_file': 'task_telephone.csv',
-                        'file_type': 'csv',
-                        'category': 'contact',
-                        'doc_type': '업무담당자연락처',
-                        'domain': 'general',
-                        'row_index': idx,
-                        'department': str(row['부서']),
-                        'position': str(row['직책']),
-                        'phone': str(row['전화번호']),
-                        'task_area': str(row['담당업무']),
-                        'cache_ttl': 2592000,  # 30일 TTL
-                        'processing_date': datetime.now().isoformat(),
-                        'chunk_type': 'contact'
-                    }
-                    
-                    chunk = TextChunk(
-                        text=chunk_text,
-                        source_id=f'general/task_telephone.csv#row_{idx}',
-                        metadata=metadata
-                    )
-                    
                     chunks.append(chunk)
-                    
-                except Exception as e:
-                    logger.error(f"연락처 행 {idx} 처리 실패: {e}")
-                    continue
             
-            logger.info(f"✅ 연락처 CSV 처리 완료: {len(chunks)}개 청크 생성 (기존 템플릿 보존)")
+            logger.info(f"{filename} 처리 완료: {len(chunks)}개 청크")
             
         except Exception as e:
-            logger.error(f"❌ 연락처 CSV 파일 처리 실패: {e}")
+            logger.error(f"PDF 처리 실패 ({filename}): {e}")
         
         return chunks
     
-    def _read_csv_with_encoding(self, csv_file: Path) -> Optional[pd.DataFrame]:
-        """인코딩 자동 감지로 CSV 읽기"""
-        encodings = ['utf-8', 'cp949', 'euc-kr', 'utf-8-sig']
+    def _create_pdf_chunk(self, page_text: str, filename: str, category: str, 
+                         prefix: str, page_num: int, total_pages: int) -> TextChunk:
+        """PDF 청크 생성"""
+        content = f"{prefix} 페이지 {page_num}\n\n{page_text.strip()}"
         
-        for encoding in encodings:
+        metadata = {
+            'source_file': filename,
+            'file_type': 'pdf',
+            'category': category,
+            'page_number': page_num,
+            'total_pages': total_pages,
+            'char_count': len(page_text),
+            'processing_date': datetime.now().isoformat()
+        }
+        
+        source_id = f'general/{filename}#page_{page_num}'
+        return TextChunk(content, source_id, metadata)
+    
+    def _process_telephone_csv(self) -> List[TextChunk]:
+        """연락처 CSV 처리"""
+        chunks = []
+        csv_file = self.source_dir / TELEPHONE_CSV
+        
+        if not csv_file.exists():
+            logger.warning(f"CSV 파일 없음: {TELEPHONE_CSV}")
+            return chunks
+        
+        try:
+            df = self._read_csv(csv_file)
+            
+            # 필수 컬럼 확인
+            missing_cols = [col for col in TELEPHONE_COLUMNS if col not in df.columns]
+            if missing_cols:
+                logger.error(f"필수 컬럼 누락: {missing_cols}")
+                return chunks
+            
+            for idx, row in df.iterrows():
+                chunk = self._create_telephone_chunk(row, idx)
+                if chunk:
+                    chunks.append(chunk)
+            
+            logger.info(f"연락처 처리 완료: {len(chunks)}개 청크")
+            
+        except Exception as e:
+            logger.error(f"CSV 처리 실패: {e}")
+        
+        return chunks
+    
+    def _create_telephone_chunk(self, row: pd.Series, idx: int) -> TextChunk:
+        """연락처 청크 생성"""
+        data = row.to_dict()
+        
+        # 필수 데이터 확인
+        for col in TELEPHONE_COLUMNS:
+            if pd.isna(data.get(col)):
+                logger.warning(f"연락처 행 {idx}: {col} 누락")
+                return None
+        
+        # 데이터 정제
+        clean_data = {k: str(v).strip() if not pd.isna(v) else '' for k, v in data.items()}
+        
+        # 템플릿 적용
+        try:
+            content = TELEPHONE_TEMPLATE.format(**clean_data)
+        except KeyError as e:
+            logger.error(f"연락처 템플릿 오류 (행 {idx}): {e}")
+            return None
+        
+        # 메타데이터
+        metadata = {
+            'source_file': TELEPHONE_CSV,
+            'file_type': 'csv',
+            'category': 'contact',
+            'row_index': idx,
+            'department': clean_data.get('부서', ''),
+            'position': clean_data.get('직책', ''),
+            'phone': clean_data.get('전화번호', ''),
+            'task_area': clean_data.get('담당업무', ''),
+            'processing_date': datetime.now().isoformat()
+        }
+        
+        source_id = f'general/{TELEPHONE_CSV}#row_{idx}'
+        return TextChunk(content, source_id, metadata)
+    
+    def _read_csv(self, file_path: Path) -> pd.DataFrame:
+        """CSV 파일 읽기"""
+        for encoding in CSV_ENCODINGS:
             try:
-                df = pd.read_csv(csv_file, encoding=encoding)
-                logger.info(f"CSV 파일 로드 성공 (인코딩: {encoding})")
-                
-                # 필수 컬럼 확인
-                required_columns = ['부서', '직책', '전화번호', '담당업무']
-                missing_columns = [col for col in required_columns if col not in df.columns]
-                
-                if missing_columns:
-                    logger.error(f"필수 컬럼 누락: {missing_columns}")
-                    logger.error(f"실제 컬럼: {list(df.columns)}")
-                    return None
-                
-                return df
-                
+                return pd.read_csv(file_path, encoding=encoding)
             except UnicodeDecodeError:
-                logger.debug(f"인코딩 {encoding} 실패, 다음 시도...")
                 continue
-            except Exception as e:
-                logger.error(f"CSV 파일 읽기 실패 (인코딩: {encoding}): {e}")
-                continue
+        raise ValueError(f"CSV 읽기 실패: {file_path}")
+    
+    def _needs_rebuild(self) -> bool:
+        """재빌드 필요 여부"""
+        # FAISS 파일 확인
+        faiss_file = self.vectorstore_dir / f"{INDEX_NAME}.faiss"
+        pkl_file = self.vectorstore_dir / f"{INDEX_NAME}.pkl"
         
-        logger.error(f"모든 인코딩 시도 실패: {csv_file}")
-        return None
+        if not (faiss_file.exists() and pkl_file.exists()):
+            return True
+        
+        # 해시 비교
+        hash_file = self.vectorstore_dir / ".source_hash"
+        if not hash_file.exists():
+            return True
+        
+        current_hash = self._calculate_hash()
+        with open(hash_file, 'r') as f:
+            stored_hash = f.read().strip()
+        
+        return current_hash != stored_hash
+    
+    def _calculate_hash(self) -> str:
+        """소스 해시 계산"""
+        hasher = hashlib.md5()
+        hasher.update(EMBEDDING_MODEL.encode())
+        
+        for filename in [HAKCHIK_PDF, OPERATION_PDF, TELEPHONE_CSV]:
+            file_path = self.source_dir / filename
+            if file_path.exists():
+                hasher.update(str(file_path.stat().st_mtime).encode())
+        
+        return hasher.hexdigest()[:16]
+    
+    def _save_hash(self):
+        """현재 해시 저장"""
+        hash_file = self.vectorstore_dir / ".source_hash"
+        with open(hash_file, 'w') as f:
+            f.write(self._calculate_hash())
 
-
-# ================================================================
-# 개발/테스트용 진입점
-# ================================================================
 
 def main():
-    """개발/테스트용 진입점"""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    loader = GeneralLoader()
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
     
     try:
-        # BaseLoader의 표준 인터페이스 사용
-        success = loader.build_vectorstore()
-        
-        if success:
-            logger.info("✅ 일반 도메인 벡터스토어 구축 완료")
-        else:
-            logger.error("❌ 일반 도메인 벡터스토어 구축 실패")
-            
+        loader = GeneralLoader()
+        loader.build_vectorstore()
+        print("✅ 일반 정보 벡터스토어 구축 완료")
     except Exception as e:
-        logger.error(f"❌ 로더 실행 실패: {e}")
-        raise
+        print(f"❌ 실패: {e}")
+        exit(1)
 
 
 if __name__ == '__main__':
