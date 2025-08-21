@@ -1,7 +1,7 @@
-name: 🔄 벡터스토어 자동 업데이트
+name: "벡터스토어 자동 업데이트"
 
 # =============================================================================
-# 🔧 파인튜닝 설정 구역
+# 파인튜닝 설정 구역
 # =============================================================================
 
 # 트리거 조건
@@ -34,7 +34,7 @@ env:
 
 jobs:
   build-vectorstores:
-    name: 🔨 벡터스토어 빌드
+    name: "벡터스토어 빌드"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     
@@ -43,27 +43,27 @@ jobs:
       
     steps:
       # 1. 저장소 체크아웃
-      - name: 📥 저장소 체크아웃
+      - name: "저장소 체크아웃"
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
       
       # 2. Python 환경 설정
-      - name: 🐍 Python 환경 설정
+      - name: "Python 환경 설정"
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
       
       # 3. 의존성 설치
-      - name: 📦 의존성 설치
+      - name: "의존성 설치"
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
       # 4. 환경 검증
-      - name: 🔍 환경 검증
+      - name: "환경 검증"
         run: |
           echo "=== 환경변수 확인 ==="
           echo "API 키: ${OPENAI_API_KEY:0:10}..."
@@ -76,19 +76,19 @@ jobs:
           echo "vectorstores 폴더:" && ls -la vectorstores/ || echo "vectorstores 없음"
       
       # 5. 변경사항 확인
-      - name: 📄 변경사항 확인
+      - name: "변경사항 확인"
         run: |
           echo "=== 최근 변경된 파일 ==="
           git diff --name-only HEAD~1 HEAD | grep "^data/" || echo "data 폴더 변경 없음"
       
       # 6. 벡터스토어 빌드 실행
-      - name: 🔨 벡터스토어 빌드 실행
+      - name: "벡터스토어 빌드 실행"
         run: |
-          echo "🚀 벡터스토어 빌드 시작"
+          echo "벡터스토어 빌드 시작"
           python scripts/build_all_vectorstores.py
       
       # 7. 빌드 결과 확인
-      - name: 📊 빌드 결과 확인
+      - name: "빌드 결과 확인"
         run: |
           echo "=== 생성된 벡터스토어 파일 ==="
           find vectorstores/ -name "*.faiss" -o -name "*.pkl" | sort || echo "벡터스토어 파일 없음"
@@ -104,7 +104,7 @@ jobs:
           du -sh vectorstores/*/ 2>/dev/null || echo "벡터스토어 폴더 없음"
       
       # 8. 변경사항 커밋
-      - name: 📝 벡터스토어 변경사항 커밋
+      - name: "벡터스토어 변경사항 커밋"
         run: |
           # Git 사용자 설정
           git config --local user.email "action@github.com"
@@ -116,28 +116,28 @@ jobs:
           
           # 변경사항 확인 및 커밋
           if git diff --staged --quiet; then
-            echo "✅ 벡터스토어 변경사항 없음"
+            echo "벡터스토어 변경사항 없음"
           else
             # 커밋 메시지 생성
             TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
             CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep "^data/" | tr '\n' ' ' || echo "수동 실행")
             
             if [ "$CHANGED_FILES" != "수동 실행" ]; then
-              COMMIT_MSG="🤖 Auto-update vectorstores - ${TIMESTAMP}
+              COMMIT_MSG="Auto-update vectorstores - ${TIMESTAMP}
 
 Changed data files: ${CHANGED_FILES}"
             else
-              COMMIT_MSG="🤖 Manual vectorstore rebuild - ${TIMESTAMP}"
+              COMMIT_MSG="Manual vectorstore rebuild - ${TIMESTAMP}"
             fi
             
             git commit -m "$COMMIT_MSG"
             git push
             
-            echo "✅ 벡터스토어 업데이트 커밋 완료"
+            echo "벡터스토어 업데이트 커밋 완료"
           fi
       
       # 9. 빌드 아티팩트 업로드
-      - name: 📁 빌드 아티팩트 업로드
+      - name: "빌드 아티팩트 업로드"
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -147,13 +147,13 @@ Changed data files: ${CHANGED_FILES}"
           retention-days: 7
       
       # 10. 성공 알림
-      - name: 🎉 빌드 성공 알림
+      - name: "빌드 성공 알림"
         if: success()
         run: |
           echo "::notice title=벡터스토어 빌드 성공::모든 벡터스토어가 성공적으로 업데이트되었습니다."
       
       # 11. 실패 알림
-      - name: ❌ 빌드 실패 알림
+      - name: "빌드 실패 알림"
         if: failure()
         run: |
           echo "::error title=벡터스토어 빌드 실패::빌드 과정에서 오류가 발생했습니다. 로그를 확인해주세요."
