@@ -90,10 +90,14 @@ class FeedbackManager:
         실패해도 앱이 중단되지 않도록 안전하게 처리
         """
         try:
-            firestore_key = self.config.get("firestore_key")
+            firestore_key = self.config.get('firestore_key')
             if not firestore_key:
                 logger.warning("FIRESTORE_KEY가 설정되지 않았습니다.")
                 return
+                
+            # 🔍 디버깅 코드 추가
+            logger.info(f"firestore_key 타입: {type(firestore_key)}")
+            logger.info(f"firestore_key 길이: {len(firestore_key) if isinstance(firestore_key, str) else 'N/A'}")
             
             # JSON 키 파싱
             if isinstance(firestore_key, str):
