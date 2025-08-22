@@ -101,12 +101,23 @@ class FeedbackManager:
             
             # JSON 키 파싱
             if isinstance(firestore_key, str):
-                key_dict = json.loads(firestore_key)
+                logger.info("JSON 파싱 시도 중...")
+                try:
+                    key_dict = json.loads(firestore_key)
+                    logger.info(f"✅ JSON 파싱 성공! 키 필드들: {list(key_dict.keys())}")
+                    logger.info(f"private_key 존재 여부: {'private_key' in key_dict}")
+                except json.JSONDecodeError as json_error:
+                    logger.error(f"❌ JSON 파싱 실패: {json_error}")
+                    logger.error(f"JSON 앞부분 (100자): {firestore_key[:100]}")
+                    return
             else:
                 key_dict = firestore_key
+                logger.info("JSON 파싱 건너뜀 (이미 딕셔너리)")
             
             # 서비스 계정 인증
+            logger.info("Google 서비스 계정 인증 시도 중...")
             credentials = service_account.Credentials.from_service_account_info(key_dict)
+            
             
             # Firestore 클라이언트 생성
             self.db = firestore.Client(
