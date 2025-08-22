@@ -167,7 +167,7 @@ class AppConfig:
     
     ENABLE_FEEDBACK: bool = True
     FIRESTORE_KEY: Optional[str] = field(default_factory=get_firestore_key)
-    FIRESTORE_PROJECT_ID: str = "Byeoli-GNHRD-feedback"
+    FIRESTORE_PROJECT_ID: str = "byeoli-gnhrd-feedback"
     FIRESTORE_COLLECTION_FEEDBACKS: str = "feedbacks"
     FIRESTORE_COLLECTION_ERRORS: str = "error_logs"
     FIRESTORE_TIMEOUT: float = 5.0
