@@ -122,7 +122,8 @@ class FeedbackManager:
             # Firestore 클라이언트 생성
             self.db = firestore.Client(
                 project=self.config['project_id'],
-                credentials=credentials
+                credentials=credentials,
+                database='byeoli-gnhrd-feedback001'
             )
             
             # 연결 테스트 (간단한 쿼리)
