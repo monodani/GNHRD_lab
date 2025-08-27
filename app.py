@@ -548,7 +548,7 @@ def render_sidebar():
         st.markdown('</div>', unsafe_allow_html=True)
 
 def render_chat_history():
-    """채팅 기록 렌더링"""
+    """채팅 기록 렌더링 - Streamlit 네이티브 버튼 사용"""
     st.markdown('<div class="chat-container">', unsafe_allow_html=True)
     
     if not st.session_state.chat_history:
@@ -582,61 +582,103 @@ def render_chat_history():
                 byeoli_image = get_byeoli_image(msg["content"])
                 message_id = msg.get("message_id", f"msg_{i}")
                 
-                # 피드백 버튼 HTML
-                feedback_html = ""
-                if message_id not in st.session_state.feedback_given:
-                    feedback_html = f"""
-                    <div class="feedback-container">
-                        <button class="feedback-btn positive" onclick="giveFeedback('{message_id}', 'positive')">
-                            👍 도움됨
-                        </button>
-                        <button class="feedback-btn negative" onclick="giveFeedback('{message_id}', 'negative')">
-                            👎 개선필요
-                        </button>
-                    </div>
-                    """
-                else:
-                    feedback_html = """
-                    <div class="feedback-container">
-                        <span class="feedback-btn disabled">피드백 완료</span>
-                    </div>
-                    """
-                
-                # 성능 정보 (개발 모드에서만)
-                performance_html = ""
-                if not IS_PRODUCTION and msg.get("elapsed_ms"):
-                    performance_html = f"""
-                    <div style="font-size: 11px; color: #9ca3af; margin-top: 8px;">
-                        ⏱️ {msg['elapsed_ms']}ms | 🎯 {msg.get('confidence', 0):.2f} | 🔧 {msg.get('domain', 'unknown')}
-                    </div>
-                    """
-                
+                # 메시지 본문 표시
                 st.markdown(f"""
                 <div class="message-card">
                     <div class="assistant-message">
                         <img src="{byeoli_image}" class="byeoli-avatar" onerror="this.style.display='none'">
                         <strong>벼리</strong><br>
                         {msg["content"]}
-                        {feedback_html}
-                        {performance_html}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
+                
+                # 피드백 버튼 (Streamlit 네이티브 버튼 사용)
+                if message_id not in st.session_state.feedback_given:
+                    col1, col2, col3 = st.columns([1, 1, 4])
+                    
+                    with col1:
+                        if st.button("👍 도움됨", key=f"pos_{message_id}", use_container_width=True):
+                            # 피드백 처리
+                            user_query = ""
+                            bot_response = msg["content"]
+                            
+                            # 이전 사용자 메시지 찾기
+                            if i > 0 and st.session_state.chat_history[i-1]["role"] == "user":
+                                user_query = st.session_state.chat_history[i-1]["content"]
+                            
+                            success = save_user_feedback(
+                                conversation_id=st.session_state.conversation_id,
+                                message_id=message_id,
+                                user_query=user_query,
+                                bot_response=bot_response,
+                                feedback_type="positive"
+                            )
+                            
+                            if success:
+                                st.session_state.feedback_given.add(message_id)
+                                st.success("피드백 감사합니다! 🙏")
+                                st.rerun()
+                            else:
+                                st.warning("피드백 저장에 실패했습니다.")
+                    
+                    with col2:
+                        if st.button("👎 개선필요", key=f"neg_{message_id}", use_container_width=True):
+                            # 피드백 처리
+                            user_query = ""
+                            bot_response = msg["content"]
+                            
+                            # 이전 사용자 메시지 찾기
+                            if i > 0 and st.session_state.chat_history[i-1]["role"] == "user":
+                                user_query = st.session_state.chat_history[i-1]["content"]
+                            
+                            success = save_user_feedback(
+                                conversation_id=st.session_state.conversation_id,
+                                message_id=message_id,
+                                user_query=user_query,
+                                bot_response=bot_response,
+                                feedback_type="negative"
+                            )
+                            
+                            if success:
+                                st.session_state.feedback_given.add(message_id)
+                                st.success("피드백 감사합니다! 🙏")
+                                st.rerun()
+                            else:
+                                st.warning("피드백 저장에 실패했습니다.")
+                
+                else:
+                    # 피드백 완료 표시
+                    st.markdown("""
+                    <div style="padding: 8px; background: #f3f4f6; border-radius: 8px; 
+                                margin-top: 8px; text-align: center; font-size: 14px; color: #6b7280;">
+                        ✅ 피드백 완료
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                # 성능 정보 (개발 모드에서만)
+                if not IS_PRODUCTION and msg.get("elapsed_ms"):
+                    st.markdown(f"""
+                    <div style="font-size: 11px; color: #9ca3af; margin-top: 8px;">
+                        ⏱️ {msg['elapsed_ms']}ms | 🎯 {msg.get('confidence', 0):.2f} | 🔧 {msg.get('domain', 'unknown')}
+                    </div>
+                    """, unsafe_allow_html=True)
     
     st.markdown('</div>', unsafe_allow_html=True)
 
 def render_input_section():
-    """입력 섹션 렌더링"""
+    """입력 섹션 렌더링 - label 경고 수정"""
     st.markdown('<div class="input-container">', unsafe_allow_html=True)
     
     with st.form(key="chat_form", clear_on_submit=True):
         col1, col2 = st.columns([5, 1])
         
         with col1:
+            # label_visibility 추가하여 경고 해결
             user_input = st.text_input(
-                "",
+                "메시지 입력",  # 빈 문자열 대신 의미있는 label 제공
                 placeholder="궁금한 것을 물어보세요... (예: 오늘 점심 메뉴는?, 2024년 교육 만족도는?)",
-                label_visibility="collapsed"
+                label_visibility="collapsed"  # label을 숨김
             )
         
         with col2:
@@ -681,7 +723,7 @@ def render_streaming_response(message_content: str, message_id: str):
 # =============================================================================
 
 def handle_feedback(message_id: str, feedback_type: str, user_query: str = "", bot_response: str = ""):
-    """피드백 처리"""
+    """피드백 처리 - 이제 필요없을 수 있음 (인라인 처리로 변경)"""
     try:
         # 피드백 저장
         success = save_user_feedback(
@@ -694,13 +736,17 @@ def handle_feedback(message_id: str, feedback_type: str, user_query: str = "", b
         
         if success:
             st.session_state.feedback_given.add(message_id)
-            st.success("피드백 감사합니다! 🙏")
+            return True
         else:
-            st.warning("피드백 저장에 실패했습니다. 잠시 후 다시 시도해주세요.")
+            return False
             
     except Exception as e:
         logger.error(f"피드백 처리 오류: {e}")
-        st.error("피드백 처리 중 오류가 발생했습니다.")
+        return False
+
+
+# JavaScript 주입 함수는 제거 (더 이상 필요없음)
+# def inject_feedback_script() -> 제거
 
 # =============================================================================
 # 쿼리 처리
@@ -810,6 +856,7 @@ def add_to_chat_history(user_input: str, result: Dict):
 # 메인 애플리케이션
 # =============================================================================
 
+# 메인 함수의 JavaScript 주입 부분도 제거
 def main():
     """메인 애플리케이션 로직"""
     
@@ -931,19 +978,6 @@ def main():
             if st.button("🗑️ 채팅 기록 삭제", use_container_width=True):
                 st.session_state.chat_history = []
                 st.rerun()
-            
-            # 피드백 테스트 (개발 모드)
-            st.markdown("### 🧪 피드백 테스트")
-            test_message_id = st.text_input("Message ID", value="test_msg_123")
-            col_pos, col_neg = st.columns(2)
-            
-            with col_pos:
-                if st.button("👍", use_container_width=True):
-                    handle_feedback(test_message_id, "positive", "테스트 질문", "테스트 응답")
-            
-            with col_neg:
-                if st.button("👎", use_container_width=True):
-                    handle_feedback(test_message_id, "negative", "테스트 질문", "테스트 응답")
 
 # =============================================================================
 # 피드백 버튼 JavaScript (클라이언트 사이드)
@@ -978,8 +1012,8 @@ def inject_feedback_script():
 
 if __name__ == "__main__":
     try:
-        # JavaScript 주입
-        inject_feedback_script()
+        # JavaScript 주입 제거 - 더 이상 필요없음
+        # inject_feedback_script()  # 제거
         
         # 메인 앱 실행
         main()
@@ -987,11 +1021,5 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"앱 실행 오류: {e}")
         st.error("애플리케이션 실행 중 오류가 발생했습니다.")
-        
         if not IS_PRODUCTION:
-            st.code(f"에러 상세:\n{str(e)}")
-            
-            import traceback
-            st.code(f"스택 트레이스:\n{traceback.format_exc()}")
-        else:
-            st.write("**문의처**: 경상남도인재개발원 055-254-2051")
+            st.exception(e)
