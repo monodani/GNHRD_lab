@@ -625,49 +625,65 @@ def render_chat_history():
                             else:
                                 st.warning("피드백 저장에 실패했습니다.")
                     
-                    with col2:
-                        if st.button("👎 개선필요", key=f"neg_{message_id}", use_container_width=True):
-                            # 피드백 처리
-                            user_query = ""
-                            bot_response = msg["content"]
-                            
-                            # 이전 사용자 메시지 찾기
-                            if i > 0 and st.session_state.chat_history[i-1]["role"] == "user":
-                                user_query = st.session_state.chat_history[i-1]["content"]
-                            
-                            success = save_user_feedback(
-                                conversation_id=st.session_state.conversation_id,
-                                message_id=message_id,
-                                user_query=user_query,
-                                bot_response=bot_response,
-                                feedback_type="negative"
-                            )
-                            
-                            if success:
-                                st.session_state.feedback_given.add(message_id)
-                                st.success("피드백 감사합니다! 🙏")
-                                st.rerun()
-                            else:
-                                st.warning("피드백 저장에 실패했습니다.")
-                
-                else:
-                    # 피드백 완료 표시
-                    st.markdown("""
-                    <div style="padding: 8px; background: #f3f4f6; border-radius: 8px; 
-                                margin-top: 8px; text-align: center; font-size: 14px; color: #6b7280;">
-                        ✅ 피드백 완료
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                # 성능 정보 (개발 모드에서만)
-                if not IS_PRODUCTION and msg.get("elapsed_ms"):
-                    st.markdown(f"""
-                    <div style="font-size: 11px; color: #9ca3af; margin-top: 8px;">
-                        ⏱️ {msg['elapsed_ms']}ms | 🎯 {msg.get('confidence', 0):.2f} | 🔧 {msg.get('domain', 'unknown')}
-                    </div>
-                    """, unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+                   with col2:
+                       if st.button("👎 개선필요", key=f"neg_{message_id}", use_container_width=True):
+                           # 개선사항 입력 모드 활성화 (바로 저장하지 않음)
+                           st.session_state.pending_improvement_feedback[message_id] = True
+                           st.rerun()
+               
+                   # 개선사항 입력창 추가 (피드백 버튼 바로 아래)
+                   if st.session_state.pending_improvement_feedback.get(message_id, False):
+                       with st.form(key=f"improvement_{message_id}"):
+                           st.write("개선해야 될 사항을 입력해주세요:")
+                           improvement_text = st.text_area("", placeholder="개선사항을 입력하세요 (선택사항)", key=f"textarea_{message_id}")
+                           
+                           col_submit, col_cancel = st.columns(2)
+                           with col_submit:
+                               if st.form_submit_button("제출", use_container_width=True):
+                                   # 이전 사용자 메시지 찾기
+                                   user_query = ""
+                                   if i > 0 and st.session_state.chat_history[i-1]["role"] == "user":
+                                       user_query = st.session_state.chat_history[i-1]["content"]
+                                   
+                                   success = save_user_feedback(
+                                       conversation_id=st.session_state.conversation_id,
+                                       message_id=message_id,
+                                       user_query=user_query,
+                                       bot_response=msg["content"],
+                                       feedback_type="negative",
+                                       feedback_reason=improvement_text  # 개선사항 추가
+                                   )
+                                   
+                                   if success:
+                                       st.session_state.feedback_given.add(message_id)
+                                       st.session_state.pending_improvement_feedback.pop(message_id, None)
+                                       st.success("피드백 감사합니다! 🙏")
+                                       st.rerun()
+                                   else:
+                                       st.warning("피드백 저장에 실패했습니다.")
+                           
+                           with col_cancel:
+                               if st.form_submit_button("취소", use_container_width=True):
+                                   st.session_state.pending_improvement_feedback.pop(message_id, None)
+                                   st.rerun()
+               
+               else:
+                   # 피드백 완료 표시
+                   st.markdown("""
+                   <div style="padding: 8px; background: #f3f4f6; border-radius: 8px; 
+                               margin-top: 8px; text-align: center; font-size: 14px; color: #6b7280;">
+                       ✅ 피드백 완료
+                   </div>
+                   """, unsafe_allow_html=True)
+               
+               # 성능 정보 (개발 모드에서만)
+               if not IS_PRODUCTION and msg.get("elapsed_ms"):
+                   st.markdown(f"""
+                   <div style="font-size: 11px; color: #9ca3af; margin-top: 8px;">
+                       ⏱️ {msg['elapsed_ms']}ms | 🎯 {msg.get('confidence', 0):.2f} | 🔧 {msg.get('domain', 'unknown')}
+                   </div>
+                   """, unsafe_allow_html=True)
+
 
 def render_input_section():
     """입력 섹션 렌더링 - label 경고 수정"""
@@ -762,8 +778,8 @@ def render_feedback_buttons(message_id: str, user_query: str, bot_response: str)
 # 피드백 시스템
 # =============================================================================
 
-def handle_feedback(message_id: str, feedback_type: str, user_query: str = "", bot_response: str = ""):
-    """피드백 처리 - 이제 필요없을 수 있음 (인라인 처리로 변경)"""
+def handle_feedback(message_id: str, feedback_type: str, user_query: str = "", bot_response: str = "", feedback_reason: str = ""):
+    """피드백 처리 - feedback_reason 파라미터 추가"""
     try:
         # 피드백 저장
         success = save_user_feedback(
@@ -772,7 +788,7 @@ def handle_feedback(message_id: str, feedback_type: str, user_query: str = "", b
             user_query=user_query,
             bot_response=bot_response,
             feedback_type=feedback_type,
-            feedback_reason=feedback_reason
+            feedback_reason=feedback_reason  # 이 파라미터 추가
         )
         
         if success:
@@ -784,10 +800,6 @@ def handle_feedback(message_id: str, feedback_type: str, user_query: str = "", b
     except Exception as e:
         logger.error(f"피드백 처리 오류: {e}")
         return False
-
-
-# JavaScript 주입 함수는 제거 (더 이상 필요없음)
-# def inject_feedback_script() -> 제거
 
 # =============================================================================
 # 쿼리 처리
