@@ -423,6 +423,9 @@ def initialize_session_state():
             "last_query_time": None
         }
 
+    if 'pending_improvement_feedback' not in st.session_state:
+        st.session_state.pending_improvement_feedback = {}  # {message_id: input_text}
+
 def reset_session():
     """세션 초기화 (새 대화 시작)"""
     # 대화 관련 상태만 초기화
@@ -718,6 +721,43 @@ def render_streaming_response(message_content: str, message_id: str):
     # 최종 메시지 (타이핑 커서 제거)
     placeholder.empty()
 
+def render_feedback_buttons(message_id: str, user_query: str, bot_response: str):
+    """우아한 피드백 버튼 렌더링 - 기존 HTML 대체"""
+    if message_id in st.session_state.feedback_given:
+        st.markdown('<span class="feedback-btn disabled">피드백 완료</span>', unsafe_allow_html=True)
+        return
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("👍 도움됨", key=f"pos_{message_id}", use_container_width=True):
+            handle_feedback(message_id, "positive", user_query, bot_response)
+            st.success("피드백 감사합니다! 🙏")
+            st.rerun()
+    
+    with col2:
+        if st.button("👎 개선필요", key=f"neg_{message_id}", use_container_width=True):
+            st.session_state.pending_improvement_feedback[message_id] = True
+            st.rerun()
+    
+    # 개선사항 입력창 (👎 클릭 시에만 나타남)
+    if st.session_state.pending_improvement_feedback.get(message_id, False):
+        with st.form(key=f"improvement_{message_id}"):
+            improvement_text = st.text_area("개선해야 될 사항을 입력해주세요", placeholder="개선사항을 입력하세요 (선택사항)")
+            col_submit, col_cancel = st.columns(2)
+            
+            with col_submit:
+                if st.form_submit_button("제출", use_container_width=True):
+                    handle_feedback(message_id, "negative", user_query, bot_response, improvement_text)
+                    st.session_state.pending_improvement_feedback.pop(message_id, None)
+                    st.success("피드백 감사합니다! 🙏")
+                    st.rerun()
+            
+            with col_cancel:
+                if st.form_submit_button("취소", use_container_width=True):
+                    st.session_state.pending_improvement_feedback.pop(message_id, None)
+                    st.rerun()
+
 # =============================================================================
 # 피드백 시스템
 # =============================================================================
@@ -731,7 +771,8 @@ def handle_feedback(message_id: str, feedback_type: str, user_query: str = "", b
             message_id=message_id,
             user_query=user_query,
             bot_response=bot_response,
-            feedback_type=feedback_type
+            feedback_type=feedback_type,
+            feedback_reason=feedback_reason
         )
         
         if success:
