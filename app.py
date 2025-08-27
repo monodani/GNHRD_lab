@@ -625,7 +625,7 @@ def render_chat_history():
                             else:
                                 st.warning("피드백 저장에 실패했습니다.")
                     
-                   with col2:
+with col2:
                        if st.button("👎 개선필요", key=f"neg_{message_id}", use_container_width=True):
                            # 개선사항 입력 모드 활성화 (바로 저장하지 않음)
                            st.session_state.pending_improvement_feedback[message_id] = True
