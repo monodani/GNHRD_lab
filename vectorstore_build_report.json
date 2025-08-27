@@ -1,14 +1,14 @@
 {
-  "timestamp": "2025-08-21T13:35:30.901982",
-  "elapsed_time": "0:00:55.595458",
+  "timestamp": "2025-08-27T11:18:15.191773",
+  "elapsed_time": "0:01:14.277651",
   "total_domains": 6,
-  "successful_domains": 5,
-  "failed_domains": 1,
-  "success_rate": "83.3%",
+  "successful_domains": 6,
+  "failed_domains": 0,
+  "success_rate": "100.0%",
   "results": {
     "cyber": {
       "status": "success",
-      "elapsed_time": 10.870222806930542,
+      "elapsed_time": 10.841891050338745,
       "stats": {
         "domain": "cyber",
         "path": "vectorstores/vectorstore_cyber",
@@ -16,29 +16,29 @@
         "faiss_size_mb": 17.58,
         "pkl_size_mb": 0.95,
         "total_size_mb": 18.53,
-        "last_modified": "2025-08-21T13:34:48.519575",
-        "build_time": 10.87,
-        "timestamp": "2025-08-21T13:34:48.532161"
+        "last_modified": "2025-08-27T11:17:13.475098",
+        "build_time": 10.84,
+        "timestamp": "2025-08-27T11:17:13.488157"
       }
     },
     "menu": {
       "status": "success",
-      "elapsed_time": 15.766326665878296,
+      "elapsed_time": 12.912438154220581,
       "stats": {
         "domain": "menu",
         "path": "vectorstores/vectorstore_menu",
         "vectorstore_exists": true,
-        "faiss_size_mb": 0.15,
+        "faiss_size_mb": 0.14,
         "pkl_size_mb": 0.0,
-        "total_size_mb": 0.16,
-        "last_modified": "2025-08-21T13:35:04.299594",
-        "build_time": 15.77,
-        "timestamp": "2025-08-21T13:35:04.301000"
+        "total_size_mb": 0.14,
+        "last_modified": "2025-08-27T11:17:26.401243",
+        "build_time": 12.91,
+        "timestamp": "2025-08-27T11:17:26.403069"
       }
     },
     "notice": {
       "status": "success",
-      "elapsed_time": 3.6945793628692627,
+      "elapsed_time": 0.7315163612365723,
       "stats": {
         "domain": "notice",
         "path": "vectorstores/vectorstore_notice",
@@ -46,14 +46,14 @@
         "faiss_size_mb": 0.19,
         "pkl_size_mb": 0.02,
         "total_size_mb": 0.21,
-        "last_modified": "2025-08-21T13:35:07.995598",
-        "build_time": 3.69,
-        "timestamp": "2025-08-21T13:35:07.997753"
+        "last_modified": "2025-08-27T11:17:27.135252",
+        "build_time": 0.73,
+        "timestamp": "2025-08-27T11:17:27.136850"
       }
     },
     "satisfaction": {
       "status": "success",
-      "elapsed_time": 21.81145477294922,
+      "elapsed_time": 18.438194274902344,
       "stats": {
         "domain": "satisfaction",
         "path": "vectorstores/vectorstore_unified_satisfaction",
@@ -61,29 +61,40 @@
         "faiss_size_mb": 40.36,
         "pkl_size_mb": 1.83,
         "total_size_mb": 42.19,
-        "last_modified": "2025-08-21T13:35:29.785625",
-        "build_time": 21.81,
-        "timestamp": "2025-08-21T13:35:29.811500"
+        "last_modified": "2025-08-27T11:17:45.551480",
+        "build_time": 18.44,
+        "timestamp": "2025-08-27T11:17:45.577348"
       }
     },
     "general": {
       "status": "success",
-      "elapsed_time": 1.0410919189453125,
+      "elapsed_time": 13.146846055984497,
       "stats": {
         "domain": "general",
         "path": "vectorstores/vectorstore_general",
         "vectorstore_exists": true,
-        "faiss_size_mb": 0.36,
-        "pkl_size_mb": 0.02,
-        "total_size_mb": 0.38,
-        "last_modified": "2025-08-21T13:35:30.853626",
-        "build_time": 1.04,
-        "timestamp": "2025-08-21T13:35:30.855244"
+        "faiss_size_mb": 0.62,
+        "pkl_size_mb": 0.06,
+        "total_size_mb": 0.68,
+        "last_modified": "2025-08-27T11:17:58.982624",
+        "build_time": 13.15,
+        "timestamp": "2025-08-27T11:17:58.984229"
       }
     },
     "publish": {
-      "status": "failed",
-      "error": "PyPDF2 라이브러리가 필요합니다"
+      "status": "success",
+      "elapsed_time": 16.205578088760376,
+      "stats": {
+        "domain": "publish",
+        "path": "vectorstores/vectorstore_unified_publish",
+        "vectorstore_exists": true,
+        "faiss_size_mb": 2.51,
+        "pkl_size_mb": 0.32,
+        "total_size_mb": 2.83,
+        "last_modified": "2025-08-27T11:18:15.187801",
+        "build_time": 16.21,
+        "timestamp": "2025-08-27T11:18:15.191755"
+      }
     }
   }
 }
