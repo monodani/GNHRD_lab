@@ -551,81 +551,81 @@ def render_sidebar():
         st.markdown('</div>', unsafe_allow_html=True)
 
 def render_chat_history():
-    """채팅 기록 렌더링 - Streamlit 네이티브 버튼 사용"""
-    st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-    
-    if not st.session_state.chat_history:
-        # 환영 메시지
-        welcome_image = get_byeoli_image("안녕하세요! 반가워요!")
-        
-        st.markdown(f"""
-        <div class="message-card">
-            <div class="assistant-message">
-                <img src="{welcome_image}" class="byeoli-avatar" onerror="this.style.display='none'">
-                <strong>벼리</strong><br>
-                안녕하세요! 경상남도인재개발원 AI 어시스턴트 벼리입니다! 🌟<br><br>
-                교육과정, 만족도 조사, 구내식당 메뉴, 공지사항 등 궁금한 것이 있으시면 언제든 물어보세요!
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        # 채팅 기록 표시
-        for i, msg in enumerate(st.session_state.chat_history):
-            if msg["role"] == "user":
-                st.markdown(f"""
-                <div class="message-card">
-                    <div class="user-message">
-                        <strong>사용자</strong><br>
-                        {msg["content"]}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                # 벼리 메시지
-                byeoli_image = get_byeoli_image(msg["content"])
-                message_id = msg.get("message_id", f"msg_{i}")
-                
-                # 메시지 본문 표시
-                st.markdown(f"""
-                <div class="message-card">
-                    <div class="assistant-message">
-                        <img src="{byeoli_image}" class="byeoli-avatar" onerror="this.style.display='none'">
-                        <strong>벼리</strong><br>
-                        {msg["content"]}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # 피드백 버튼 (Streamlit 네이티브 버튼 사용)
-                if message_id not in st.session_state.feedback_given:
-                    col1, col2, col3 = st.columns([1, 1, 4])
-                    
-                    with col1:
-                        if st.button("👍 도움됨", key=f"pos_{message_id}", use_container_width=True):
-                            # 피드백 처리
-                            user_query = ""
-                            bot_response = msg["content"]
-                            
-                            # 이전 사용자 메시지 찾기
-                            if i > 0 and st.session_state.chat_history[i-1]["role"] == "user":
-                                user_query = st.session_state.chat_history[i-1]["content"]
-                            
-                            success = save_user_feedback(
-                                conversation_id=st.session_state.conversation_id,
-                                message_id=message_id,
-                                user_query=user_query,
-                                bot_response=bot_response,
-                                feedback_type="positive"
-                            )
-                            
-                            if success:
-                                st.session_state.feedback_given.add(message_id)
-                                st.success("피드백 감사합니다! 🙏")
-                                st.rerun()
-                            else:
-                                st.warning("피드백 저장에 실패했습니다.")
-                    
-with col2:
+   """채팅 기록 렌더링 - Streamlit 네이티브 버튼 사용"""
+   st.markdown('<div class="chat-container">', unsafe_allow_html=True)
+   
+   if not st.session_state.chat_history:
+       # 환영 메시지
+       welcome_image = get_byeoli_image("안녕하세요! 반가워요!")
+       
+       st.markdown(f"""
+       <div class="message-card">
+           <div class="assistant-message">
+               <img src="{welcome_image}" class="byeoli-avatar" onerror="this.style.display='none'">
+               <strong>벼리</strong><br>
+               안녕하세요! 경상남도인재개발원 AI 어시스턴트 벼리입니다! 🌟<br><br>
+               교육과정, 만족도 조사, 구내식당 메뉴, 공지사항 등 궁금한 것이 있으시면 언제든 물어보세요!
+           </div>
+       </div>
+       """, unsafe_allow_html=True)
+   else:
+       # 채팅 기록 표시
+       for i, msg in enumerate(st.session_state.chat_history):
+           if msg["role"] == "user":
+               st.markdown(f"""
+               <div class="message-card">
+                   <div class="user-message">
+                       <strong>사용자</strong><br>
+                       {msg["content"]}
+                   </div>
+               </div>
+               """, unsafe_allow_html=True)
+           else:
+               # 벼리 메시지
+               byeoli_image = get_byeoli_image(msg["content"])
+               message_id = msg.get("message_id", f"msg_{i}")
+               
+               # 메시지 본문 표시
+               st.markdown(f"""
+               <div class="message-card">
+                   <div class="assistant-message">
+                       <img src="{byeoli_image}" class="byeoli-avatar" onerror="this.style.display='none'">
+                       <strong>벼리</strong><br>
+                       {msg["content"]}
+                   </div>
+               </div>
+               """, unsafe_allow_html=True)
+               
+               # 피드백 버튼 (Streamlit 네이티브 버튼 사용)
+               if message_id not in st.session_state.feedback_given:
+                   col1, col2, col3 = st.columns([1, 1, 4])
+                   
+                   with col1:
+                       if st.button("👍 도움됨", key=f"pos_{message_id}", use_container_width=True):
+                           # 피드백 처리
+                           user_query = ""
+                           bot_response = msg["content"]
+                           
+                           # 이전 사용자 메시지 찾기
+                           if i > 0 and st.session_state.chat_history[i-1]["role"] == "user":
+                               user_query = st.session_state.chat_history[i-1]["content"]
+                           
+                           success = save_user_feedback(
+                               conversation_id=st.session_state.conversation_id,
+                               message_id=message_id,
+                               user_query=user_query,
+                               bot_response=bot_response,
+                               feedback_type="positive"
+                           )
+                           
+                           if success:
+                               st.session_state.feedback_given.add(message_id)
+                               st.success("피드백 감사합니다! 🙏")
+                               st.rerun()
+                           else:
+                               st.warning("피드백 저장에 실패했습니다.")
+                   
+                   with col2:
                        if st.button("👎 개선필요", key=f"neg_{message_id}", use_container_width=True):
                            # 개선사항 입력 모드 활성화 (바로 저장하지 않음)
                            st.session_state.pending_improvement_feedback[message_id] = True
@@ -683,6 +683,8 @@ with col2:
                        ⏱️ {msg['elapsed_ms']}ms | 🎯 {msg.get('confidence', 0):.2f} | 🔧 {msg.get('domain', 'unknown')}
                    </div>
                    """, unsafe_allow_html=True)
+   
+   st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_input_section():
