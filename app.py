@@ -351,16 +351,8 @@ def load_custom_css():
     <script>
     function scrollToOptimalView() {
         setTimeout(() => {
-            const chatContainer = document.querySelector('.chat-container');
-            const inputContainer = document.querySelector('.input-container');
-        
-            if (chatContainer && inputContainer) {
-                const chatBottom = chatContainer.offsetTop + chatContainer.offsetHeight;
-                const optimalPosition = chatBottom - window.innerHeight * 0.0; // 화면의 70% 지점
-            
-                window.scrollTo({ top: Math.max(0, optimalPosition), behavior: 'smooth' });
-            }
-        }, 200);
+            window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        }, 300);
     }
 
     </script>
