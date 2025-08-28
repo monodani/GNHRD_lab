@@ -559,10 +559,6 @@ def render_sidebar():
         
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # 새 메시지가 있을 때만 자동 스크롤
-        if len(st.session_state.chat_history) > 0:
-            st.components.v1.html("<script>scrollToOptimalView();</script>", height=0)
-
 def render_chat_history():
    """채팅 기록 렌더링 - Streamlit 네이티브 버튼 사용"""
    st.markdown('<div class="chat-container">', unsafe_allow_html=True)
@@ -698,6 +694,10 @@ def render_chat_history():
                    """, unsafe_allow_html=True)
    
    st.markdown('</div>', unsafe_allow_html=True)
+   
+   # 새 메시지가 있을 때만 자동 스크롤
+   if len(st.session_state.chat_history) > 0:
+        st.components.v1.html("<script>scrollToOptimalView();</script>", height=0)
 
 
 def render_input_section():
@@ -753,7 +753,13 @@ def render_streaming_response(message_content: str, message_id: str):
     placeholder.empty()
 
     # 스트리밍 완료 후 최적 뷰로 스크롤
-    st.components.v1.html("<script>scrollToOptimalView();</script>", height=0)
+    st.markdown("""
+    <script>
+    setTimeout(() => {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    }, 300);
+    </script>
+    """, unsafe_allow_html=True)
 
 def render_feedback_buttons(message_id: str, user_query: str, bot_response: str):
     """우아한 피드백 버튼 렌더링 - 기존 HTML 대체"""
