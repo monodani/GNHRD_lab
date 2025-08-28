@@ -356,7 +356,7 @@ def load_custom_css():
         
             if (chatContainer && inputContainer) {
                 const chatBottom = chatContainer.offsetTop + chatContainer.offsetHeight;
-                const optimalPosition = chatBottom - window.innerHeight * 0.3; // 화면의 70% 지점
+                const optimalPosition = chatBottom - window.innerHeight * 0.0; // 화면의 70% 지점
             
                 window.scrollTo({ top: Math.max(0, optimalPosition), behavior: 'smooth' });
             }
