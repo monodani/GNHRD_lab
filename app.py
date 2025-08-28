@@ -560,7 +560,7 @@ def render_sidebar():
 
         # 새 메시지가 있을 때만 자동 스크롤
         if len(st.session_state.chat_history) > 0:
-            st.components.v1.html("<script>autoScrollToBottom();</script>", height=0)
+            st.components.v1.html("<script>window.parent.autoScrollToBottom && window.parent.autoScrollToBottom();</script>", height=0)
 
 def render_chat_history():
    """채팅 기록 렌더링 - Streamlit 네이티브 버튼 사용"""
