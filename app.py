@@ -352,7 +352,7 @@ def load_custom_css():
     function scrollToOptimalView() {
         setTimeout(() => {
             window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-        }, 300);
+        }, 200);
     }
 
     </script>
@@ -992,7 +992,7 @@ def main():
                 <script>
                 setTimeout(() => {
                     window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-                }, 500);
+                }, 200);
                 </script>
                 """, unsafe_allow_html=True)
                 
@@ -1031,7 +1031,7 @@ def main():
                     <script>
                     setTimeout(() => {
                         window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-                    }, 500);
+                    }, 200);
                     </script>
                     """, unsafe_allow_html=True)
                 else:
