@@ -349,11 +349,20 @@ def load_custom_css():
     </style>
     
     <script>
-    function autoScrollToBottom() {
+    function scrollToOptimalView() {
         setTimeout(() => {
-            window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-        }, 100);
+            const chatContainer = document.querySelector('.chat-container');
+            const inputContainer = document.querySelector('.input-container');
+        
+            if (chatContainer && inputContainer) {
+                const chatBottom = chatContainer.offsetTop + chatContainer.offsetHeight;
+                const optimalPosition = chatBottom - window.innerHeight * 0.3; // 화면의 70% 지점
+            
+                window.scrollTo({ top: Math.max(0, optimalPosition), behavior: 'smooth' });
+            }
+        }, 200);
     }
+
     </script>
     """, unsafe_allow_html=True)
 
@@ -560,7 +569,7 @@ def render_sidebar():
 
         # 새 메시지가 있을 때만 자동 스크롤
         if len(st.session_state.chat_history) > 0:
-            st.components.v1.html("<script>window.parent.autoScrollToBottom && window.parent.autoScrollToBottom();</script>", height=0)
+            st.components.v1.html("<script>scrollToOptimalView();</script>", height=0)
 
 def render_chat_history():
    """채팅 기록 렌더링 - Streamlit 네이티브 버튼 사용"""
@@ -751,8 +760,8 @@ def render_streaming_response(message_content: str, message_id: str):
     # 최종 메시지 (타이핑 커서 제거)
     placeholder.empty()
 
-    # 스트리밍 완료 후 스크롤
-    st.components.v1.html("<script>window.parent.autoScrollToBottom && window.parent.autoScrollToBottom();</script>", height=0)
+    # 스트리밍 완료 후 최적 뷰로 스크롤
+    st.components.v1.html("<script>scrollToOptimalView();</script>", height=0)
 
 def render_feedback_buttons(message_id: str, user_query: str, bot_response: str):
     """우아한 피드백 버튼 렌더링 - 기존 HTML 대체"""
