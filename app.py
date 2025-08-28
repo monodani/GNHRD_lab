@@ -693,11 +693,13 @@ def render_chat_history():
                    </div>
                    """, unsafe_allow_html=True)
    
-   st.markdown('</div>', unsafe_allow_html=True)
-   
-   # 새 메시지가 있을 때만 자동 스크롤
-   if len(st.session_state.chat_history) > 0:
-        st.components.v1.html("<script>scrollToOptimalView();</script>", height=0)
+    st.markdown("""
+    <script>
+    setTimeout(() => {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    }, 300);
+    </script>
+    """, unsafe_allow_html=True)
 
 
 def render_input_section():
