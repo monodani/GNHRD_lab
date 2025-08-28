@@ -693,13 +693,7 @@ def render_chat_history():
                    </div>
                    """, unsafe_allow_html=True)
    
-    st.markdown("""
-    <script>
-    setTimeout(() => {
-        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-    }, 300);
-    </script>
-    """, unsafe_allow_html=True)
+   st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_input_section():
@@ -753,15 +747,6 @@ def render_streaming_response(message_content: str, message_id: str):
     
     # 최종 메시지 (타이핑 커서 제거)
     placeholder.empty()
-
-    # 스트리밍 완료 후 최적 뷰로 스크롤
-    st.markdown("""
-    <script>
-    setTimeout(() => {
-        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-    }, 300);
-    </script>
-    """, unsafe_allow_html=True)
 
 def render_feedback_buttons(message_id: str, user_query: str, bot_response: str):
     """우아한 피드백 버튼 렌더링 - 기존 HTML 대체"""
@@ -1002,8 +987,18 @@ def main():
                     response = result["response"]
                     render_streaming_response(response.answer, result["message_id"])
                 
+                # 자동 스크롤 트리거
+                st.markdown("""
+                <script>
+                setTimeout(() => {
+                    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+                }, 500);
+                </script>
+                """, unsafe_allow_html=True)
+                
                 # 페이지 새로고침
                 st.rerun()
+                
     
     else:
         # 개발 모드: 사이드바 포함 레이아웃
@@ -1023,19 +1018,28 @@ def main():
                     result = process_user_query(user_input)
                 
                 # 채팅 기록에 추가
-                add_to_chat_history(user_input, result)
-                
+                add_to_chat_history(user_input, result)              
+
                 # 성공시 스트리밍 효과
                 if result["success"]:
                     response = result["response"]
                     render_streaming_response(response.answer, result["message_id"])
                     st.success("✅ 응답 완료!")
+                    
+                    # 자동 스크롤 트리거
+                    st.markdown("""
+                    <script>
+                    setTimeout(() => {
+                        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+                    }, 500);
+                    </script>
+                    """, unsafe_allow_html=True)
                 else:
                     st.error("❌ 처리 중 오류가 발생했습니다.")
                     st.code(result.get("error", ""))
                 
                 # 페이지 새로고침
-                st.rerun()
+                st.rerun()              
         
         with col2:
             # 개발 모드 추가 정보
