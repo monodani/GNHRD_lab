@@ -596,140 +596,79 @@ def render_sidebar():
         st.markdown('</div>', unsafe_allow_html=True)
 
 def render_chat_history():
-   """채팅 기록 렌더링 - Streamlit 네이티브 버튼 사용"""
-   st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-   
-   if not st.session_state.chat_history:
-       # 환영 메시지
-       welcome_image = get_byeoli_image("안녕하세요! 반가워요!")
-       
-       st.markdown(f"""
-       <div class="message-card">
-           <div class="assistant-message">
-               <img src="{welcome_image}" class="byeoli-avatar" onerror="this.style.display='none'">
-               <strong>벼리</strong><br>
-               안녕하세요! 경상남도인재개발원 AI 어시스턴트 벼리입니다! 🌟<br><br>
-               교육과정, 만족도 조사, 구내식당 메뉴, 공지사항 등 궁금한 것이 있으시면 언제든 물어보세요!
-           </div>
-       </div>
-       """, unsafe_allow_html=True)
-   else:
-       # 채팅 기록 표시
-       for i, msg in enumerate(st.session_state.chat_history):
-           if msg["role"] == "user":
-               st.markdown(f"""
-               <div class="message-card">
-                   <div class="user-message">
-                       <strong>사용자</strong><br>
-                       {msg["content"]}
-                   </div>
-               </div>
-               """, unsafe_allow_html=True)
-           else:
-               # 벼리 메시지
-               byeoli_image = get_byeoli_image(msg["content"])
-               message_id = msg.get("message_id", f"msg_{i}")
-               
-               # 메시지 본문 표시
-               st.markdown(f"""
-               <div class="message-card">
-                   <div class="assistant-message">
-                       <img src="{byeoli_image}" class="byeoli-avatar" onerror="this.style.display='none'">
-                       <strong>벼리</strong><br>
-                       {msg["content"]}
-                   </div>
-               </div>
-               """, unsafe_allow_html=True)
-               
-               # 피드백 버튼 (Streamlit 네이티브 버튼 사용)
-               if message_id not in st.session_state.feedback_given:
-                   col1, col2, col3 = st.columns([1, 1, 4])
-                   
-                   with col1:
-                       if st.button("👍 도움됨", key=f"pos_{message_id}", use_container_width=True):
-                           # 피드백 처리
-                           user_query = ""
-                           bot_response = msg["content"]
-                           
-                           # 이전 사용자 메시지 찾기
-                           if i > 0 and st.session_state.chat_history[i-1]["role"] == "user":
-                               user_query = st.session_state.chat_history[i-1]["content"]
-                           
-                           success = save_user_feedback(
-                               conversation_id=st.session_state.conversation_id,
-                               message_id=message_id,
-                               user_query=user_query,
-                               bot_response=bot_response,
-                               feedback_type="positive"
-                           )
-                           
-                           if success:
-                               st.session_state.feedback_given.add(message_id)
-                               st.success("피드백 감사합니다! 🙏")
-                               st.rerun()
-                           else:
-                               st.warning("피드백 저장에 실패했습니다.")
-                   
-                   with col2:
-                       if st.button("👎 개선필요", key=f"neg_{message_id}", use_container_width=True):
-                           # 개선사항 입력 모드 활성화 (바로 저장하지 않음)
-                           st.session_state.pending_improvement_feedback[message_id] = True
-                           st.rerun()
-               
-                   # 개선사항 입력창 추가 (피드백 버튼 바로 아래)
-                   if st.session_state.pending_improvement_feedback.get(message_id, False):
-                       with st.form(key=f"improvement_{message_id}"):
-                           st.write("개선해야 될 사항을 입력해주세요:")
-                           improvement_text = st.text_area("", placeholder="개선사항을 입력하세요 (선택사항)", key=f"textarea_{message_id}")
-                           
-                           col_submit, col_cancel = st.columns(2)
-                           with col_submit:
-                               if st.form_submit_button("제출", use_container_width=True):
-                                   # 이전 사용자 메시지 찾기
-                                   user_query = ""
-                                   if i > 0 and st.session_state.chat_history[i-1]["role"] == "user":
-                                       user_query = st.session_state.chat_history[i-1]["content"]
-                                   
-                                   success = save_user_feedback(
-                                       conversation_id=st.session_state.conversation_id,
-                                       message_id=message_id,
-                                       user_query=user_query,
-                                       bot_response=msg["content"],
-                                       feedback_type="negative",
-                                       feedback_reason=improvement_text  # 개선사항 추가
-                                   )
-                                   
-                                   if success:
-                                       st.session_state.feedback_given.add(message_id)
-                                       st.session_state.pending_improvement_feedback.pop(message_id, None)
-                                       st.success("피드백 감사합니다! 🙏")
-                                       st.rerun()
-                                   else:
-                                       st.warning("피드백 저장에 실패했습니다.")
-                           
-                           with col_cancel:
-                               if st.form_submit_button("취소", use_container_width=True):
-                                   st.session_state.pending_improvement_feedback.pop(message_id, None)
-                                   st.rerun()
-               
-               else:
-                   # 피드백 완료 표시
-                   st.markdown("""
-                   <div style="padding: 8px; background: #f3f4f6; border-radius: 8px; 
-                               margin-top: 8px; text-align: center; font-size: 14px; color: #6b7280;">
-                       ✅ 피드백 완료
-                   </div>
-                   """, unsafe_allow_html=True)
-               
-               # 성능 정보 (개발 모드에서만)
-               if not IS_PRODUCTION and msg.get("elapsed_ms"):
-                   st.markdown(f"""
-                   <div style="font-size: 11px; color: #9ca3af; margin-top: 8px;">
-                       ⏱️ {msg['elapsed_ms']}ms | 🎯 {msg.get('confidence', 0):.2f} | 🔧 {msg.get('domain', 'unknown')}
-                   </div>
-                   """, unsafe_allow_html=True)
-   
-   st.markdown('</div>', unsafe_allow_html=True)
+    """채팅 기록 렌더링 - 자동 스크롤 앵커 추가"""
+    st.markdown('<div class="chat-container">', unsafe_allow_html=True)
+    
+    if not st.session_state.chat_history:
+        # 환영 메시지
+        welcome_image = get_byeoli_image("안녕하세요! 반가워요!")
+        
+        st.markdown(f"""
+        <div class="message-card">
+            <div class="assistant-message">
+                <img src="{welcome_image}" class="byeoli-avatar" onerror="this.style.display='none'">
+                <strong>벼리</strong><br>
+                안녕하세요! 경상남도인재개발원 AI 어시스턴트 벼리입니다! 🌟<br><br>
+                교육과정, 만족도 조사, 구내식당 메뉴, 공지사항 등 궁금한 것이 있으시면 언제든 물어보세요!
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    else:
+        # 채팅 기록 렌더링
+        for i, message in enumerate(st.session_state.chat_history):
+            if message["role"] == "user":
+                # 사용자 메시지
+                st.markdown(f"""
+                <div class="message-card">
+                    <div class="user-message">
+                        {message["content"]}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+            elif message["role"] == "assistant":
+                # 벼리 응답
+                byeoli_image = get_byeoli_image(message["content"])
+                
+                st.markdown(f"""
+                <div class="message-card">
+                    <div class="assistant-message">
+                        <img src="{byeoli_image}" class="byeoli-avatar" onerror="this.style.display='none'">
+                        <strong>벼리</strong><br>
+                        {message["content"]}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # 피드백 버튼 (Streamlit 네이티브)
+                message_id = message.get("message_id")
+                if message_id:
+                    # 이전 사용자 메시지 찾기
+                    user_query = ""
+                    if i > 0 and st.session_state.chat_history[i-1]["role"] == "user":
+                        user_query = st.session_state.chat_history[i-1]["content"]
+                    
+                    render_feedback_buttons(message_id, user_query, message["content"])
+                    st.markdown("---")
+    
+    # 스크롤 앵커 - 하단 기준점
+    st.markdown('<div id="chat-scroll-anchor" class="scroll-anchor"></div>', unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # 자동 스크롤 트리거 (새 메시지 후)
+    if len(st.session_state.chat_history) > 0:
+        st.markdown("""
+        <script>
+            // 메시지 업데이트 후 스크롤
+            setTimeout(function() {
+                if (window.isUserNearBottom && window.isUserNearBottom()) {
+                    window.smoothScrollToBottom && window.smoothScrollToBottom();
+                }
+            }, 100);
+        </script>
+        """, unsafe_allow_html=True)
 
 
 def render_input_section():
@@ -755,7 +694,7 @@ def render_input_section():
     return user_input if submitted and user_input.strip() else None
 
 def render_streaming_response(message_content: str, message_id: str):
-    """단어별 스트리밍 응답 렌더링"""
+    """단어별 스트리밍 응답 렌더링 - 실시간 스크롤 동기화"""
     if not STREAMING_ENABLED:
         return
     
@@ -778,11 +717,51 @@ def render_streaming_response(message_content: str, message_id: str):
                 </div>
             </div>
             """, unsafe_allow_html=True)
+            
+            # 스크롤 앵커와 실시간 스크롤
+            st.markdown('<div id="chat-scroll-anchor" class="scroll-anchor"></div>', unsafe_allow_html=True)
         
         time.sleep(STREAMING_WORD_DELAY)
+        
+        # 스트리밍 중에도 부드러운 스크롤 (5단어마다)
+        if i % 5 == 0:
+            st.markdown("""
+            <script>
+                setTimeout(function() {
+                    if (window.smoothScrollToBottom) {
+                        window.smoothScrollToBottom();
+                    }
+                }, 10);
+            </script>
+            """, unsafe_allow_html=True)
     
-    # 최종 메시지 (타이핑 커서 제거)
+    # 최종 메시지 (타이핑 커서 제거 + 최종 스크롤)
     placeholder.empty()
+    
+    with placeholder.container():
+        st.markdown(f"""
+        <div class="message-card">
+            <div class="assistant-message">
+                <img src="{byeoli_image}" class="byeoli-avatar" onerror="this.style.display='none'">
+                <strong>벼리</strong><br>
+                {displayed_text.strip()}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # 최종 스크롤 앵커
+        st.markdown('<div id="chat-scroll-anchor" class="scroll-anchor"></div>', unsafe_allow_html=True)
+    
+    # 스트리밍 완료 후 최종 스크롤
+    st.markdown("""
+    <script>
+        setTimeout(function() {
+            if (window.smoothScrollToBottom) {
+                window.smoothScrollToBottom();
+            }
+        }, 200);
+    </script>
+    """, unsafe_allow_html=True)
 
 def render_feedback_buttons(message_id: str, user_query: str, bot_response: str):
     """우아한 피드백 버튼 렌더링 - 기존 HTML 대체"""
@@ -917,7 +896,7 @@ def update_performance_stats(elapsed_time: float, success: bool):
         stats["success_rate"] = max(stats["success_rate"] - 2, 0)
 
 def add_to_chat_history(user_input: str, result: Dict):
-    """채팅 기록에 추가"""
+    """채팅 기록에 추가 - 스크롤 트리거 포함"""
     # 최대 기록 수 체크
     if len(st.session_state.chat_history) >= MAX_CHAT_HISTORY * 2:
         st.session_state.chat_history = st.session_state.chat_history[-MAX_CHAT_HISTORY:]
@@ -951,7 +930,9 @@ def add_to_chat_history(user_input: str, result: Dict):
             "elapsed_ms": int(result["elapsed_time"] * 1000),
             "timestamp": datetime.now()
         })
-
+    
+    # 새 메시지 추가 후 스크롤 트리거 설정
+    # (실제 스크롤은 render_chat_history에서 처리됨)
 # =============================================================================
 # 메인 애플리케이션
 # =============================================================================
