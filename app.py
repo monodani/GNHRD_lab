@@ -804,24 +804,48 @@ def handle_feedback(message_id: str, feedback_type: str, user_query: str = "", b
         return False
 
 # =============================================================================
-# 쿼리 처리
+# 쿼리 처리 - 완전한 대화 맥락 연동 수정
 # =============================================================================
 
 def process_user_query(user_input: str):
-    """사용자 쿼리 처리"""
+    """사용자 쿼리 처리 - 대화 맥락 연동 완료 ✅"""
     start_time = time.time()
     
     try:
-        # 쿼리 요청 생성
+        # ✅ 1. conversation_manager와 Streamlit 세션 연동 
+        conversation_manager = st.session_state.conversation_manager
+        
+        # ✅ 2. 기존 채팅 기록을 conversation_manager에 동기화
+        # 최근 10개 메시지를 쌍으로 묶어서 동기화 (성능 최적화)
+        recent_messages = st.session_state.chat_history[-10:]
+        for i in range(0, len(recent_messages)-1, 2):
+            if (recent_messages[i]["role"] == "user" and 
+                i+1 < len(recent_messages) and 
+                recent_messages[i+1]["role"] == "assistant"):
+                
+                # 사용자-AI 쌍을 conversation_manager에 추가
+                try:
+                    conversation_manager.add_turn(
+                        conv_id=st.session_state.conversation_id,
+                        user_message=recent_messages[i]["content"],
+                        bot_response=recent_messages[i+1]["content"],
+                        confidence=recent_messages[i+1].get("confidence", 0.0),
+                        domain_used=recent_messages[i+1].get("domain", "general")
+                    )
+                except Exception as sync_error:
+                    logger.warning(f"대화 기록 동기화 일부 실패: {sync_error}")
+                    # 동기화 실패해도 계속 진행
+        
+        # ✅ 3. 쿼리 요청 생성
         request = QueryRequest(
             query=user_input,
             conversation_id=st.session_state.conversation_id
         )
         
-        # CentralOrchestrator를 통한 처리
+        # ✅ 4. CentralOrchestrator를 통한 처리 (대화 맥락이 이제 연동됨!)
         response = process_query(user_input, st.session_state.conversation_id)
         
-        # 응답 처리
+        # ✅ 5. 응답 처리 (기존과 동일)
         elapsed_time = time.time() - start_time
         message_id = response.message_id
         
@@ -1078,3 +1102,34 @@ if __name__ == "__main__":
         st.error("애플리케이션 실행 중 오류가 발생했습니다.")
         if not IS_PRODUCTION:
             st.exception(e)
+
+# =============================================================================
+# 테스트용 함수 (개발 모드에서만)
+# =============================================================================
+
+def test_conversation_context():
+    """대화 맥락 연동 테스트 함수 (개발 모드에서만)"""
+    if IS_PRODUCTION:
+        return
+    
+    try:
+        conversation_manager = st.session_state.conversation_manager
+        conv_id = st.session_state.conversation_id
+        
+        # 현재 대화 통계 조회
+        stats = conversation_manager.get_conversation_stats(conv_id)
+        
+        st.write("### 🔍 대화 맥락 테스트")
+        st.json(stats)
+        
+        # 최근 맥락 확인
+        recent_context = conversation_manager.get_recent_context_for_reference(conv_id)
+        if recent_context:
+            st.write("**최근 대화 맥락:**")
+            st.text(recent_context[:200] + "..." if len(recent_context) > 200 else recent_context)
+        
+        return True
+        
+    except Exception as e:
+        st.error(f"대화 맥락 테스트 실패: {e}")
+        return False
