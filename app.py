@@ -347,16 +347,6 @@ def load_custom_css():
     footer { display: none; }
     header { display: none; }
     </style>
-    
-    <script>
-    function scrollToOptimalView() {
-        setTimeout(() => {
-            const scrollPosition = document.body.scrollHeight - 0;
-            window.scrollTo({ top: scrollPosition, behavior: 'smooth' });
-        }, 200);
-    }
-
-    </script>
     """, unsafe_allow_html=True)
 
 # =============================================================================
@@ -988,19 +978,8 @@ def main():
                     response = result["response"]
                     render_streaming_response(response.answer, result["message_id"])
                 
-                # 자동 스크롤 트리거
-                st.markdown("""
-                <script>
-                setTimeout(() => {
-                    const scrollPosition = document.body.scrollHeight - 0;
-                    window.scrollTo({ top: scrollPosition, behavior: 'smooth' });
-                }, 300);
-                </script>
-                """, unsafe_allow_html=True)
-                
                 # 페이지 새로고침
                 st.rerun()
-                
     
     else:
         # 개발 모드: 사이드바 포함 레이아웃
@@ -1020,29 +999,19 @@ def main():
                     result = process_user_query(user_input)
                 
                 # 채팅 기록에 추가
-                add_to_chat_history(user_input, result)              
-
+                add_to_chat_history(user_input, result)
+                
                 # 성공시 스트리밍 효과
                 if result["success"]:
                     response = result["response"]
                     render_streaming_response(response.answer, result["message_id"])
                     st.success("✅ 응답 완료!")
-                    
-                    # 자동 스크롤 트리거
-                    st.markdown("""
-                    <script>
-                    setTimeout(() => {
-                        const scrollPosition = document.body.scrollHeight - 0;
-                        window.scrollTo({ top: scrollPosition, behavior: 'smooth' });
-                    }, 300);
-                    </script>
-                    """, unsafe_allow_html=True)
                 else:
                     st.error("❌ 처리 중 오류가 발생했습니다.")
                     st.code(result.get("error", ""))
                 
                 # 페이지 새로고침
-                st.rerun()              
+                st.rerun()
         
         with col2:
             # 개발 모드 추가 정보
