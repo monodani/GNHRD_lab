@@ -45,7 +45,7 @@ TOP_RANKING_BOOST = 0.02          # 상위권 보너스
 BOTTOM_RANKING_PENALTY = -0.02    # 하위권 페널티
 
 # 키워드 매칭
-COURSE_KEYWORDS = ["교육과정", "과정"]
+COURSE_KEYWORDS = ["교육과정","종합만족도"]
 SUBJECT_KEYWORDS = ["교과목", "강의", "수업"]
 
 # 담당부서 정보 (코랩 방식: 직접 정의)
