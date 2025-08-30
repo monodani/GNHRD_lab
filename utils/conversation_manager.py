@@ -166,7 +166,7 @@ class ConversationManager:
                     self._start_background_summary(conv_id, conversation.turns.copy())
                 
                 # 현재 턴들 초기화 (요약이 summary에 저장됨)
-                conversation.turns = []
+                conversation.turns = conversation.turns[-2:]
                 logger.info(f"대화 {conv_id}: 5턴 완료, 백그라운드 요약 시작")
         
         logger.debug(f"대화 턴 추가: {conv_id}, message_id: {message_id}")
