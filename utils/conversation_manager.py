@@ -135,6 +135,12 @@ class ConversationManager:
         """
         conversation = self.get_conversation(conv_id)
         
+        if (conversation.turns and 
+            conversation.turns[-1].user_message == user_message):
+            return conversation.turns[-1].message_id
+                
+
+        
         # message_id 생성 (피드백 시스템 연동)
         message_id = str(uuid.uuid4())
         
@@ -165,6 +171,7 @@ class ConversationManager:
         
         logger.debug(f"대화 턴 추가: {conv_id}, message_id: {message_id}")
         return message_id
+    
     
     def _start_background_summary(self, conv_id: str, turns: List[ConversationTurn]) -> None:
         """
