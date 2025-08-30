@@ -64,10 +64,7 @@ class GeneralHandler:
     def search_chunks(self, query: str) -> List[ChunkResult]:
         """
         일반 정보 검색 전용 메서드
-        
-        Args:
-            query: 사용자 질문
-            
+
         Returns:
             List[ChunkResult]: 검색 결과 (상위 3개)
         """
@@ -75,54 +72,65 @@ class GeneralHandler:
             # 1. FAISS 검색 수행
             vectorstore = self.index_manager.get_vectorstore("general")
             docs_with_scores = vectorstore.similarity_search_with_score(query, k=5)
-            
+
             if not docs_with_scores:
                 logger.warning("일반 정보 검색 결과가 없습니다.")
                 return []
-            
+
             # 2. 쿼리 타입 분석 (최소 지능형)
             preferred_type = self._analyze_query_type(query)
-            
-            # 3. ChunkResult 생성
-            chunk_results = []
-            for i, (doc, distance_score) in enumerate(docs_with_scores):
-                # 거리 → 유사도 변환
-                similarity = self._distance_to_similarity(distance_score)
-                
-                # 순위 기반 미세 조정
-                rank_penalty = i * 0.02  # 1등: 0, 2등: -0.02, 3등: -0.04, ...
-                confidence = similarity - rank_penalty
-                
-                # confidence 범위 제한
-                confidence = max(0.0, min(1.0, confidence))
-                
-                # ChunkResult 생성
-                chunk_result = ChunkResult(
-                    chunk=TextChunk(
-                        content=doc.page_content,
-                        metadata=doc.metadata
-                    ),
+
+            # =========================
+            # [MOD] 점수모드 자동감지 + 유사도 변환 함수 정의
+            # - raw score가 1.0을 초과하는 값이 다수면 'distance'로 간주
+            # - distance → similarity: 1 - min(d,1)
+            # - similarity 이미 [0,1] 범위면 그대로 사용
+            # =========================
+            raw_scores = [s for _, s in docs_with_scores]
+            over_one = sum(1 for s in raw_scores if s > 1.0)
+            score_mode = "distance" if over_one >= max(1, len(raw_scores)//4) else "similarity"
+            to_sim = (lambda s: 1.0 - min(s, 1.0)) if score_mode == "distance" else (lambda s: max(0.0, min(s, 1.0)))
+
+            # 3. ChunkResult 생성 (유사도 기반)
+            scored = []
+            for i, (doc, raw_score) in enumerate(docs_with_scores, 1):
+                # [MOD] 거리→유사도 단순 변환, rank 패널티 삭제
+                similarity = to_sim(raw_score)
+                confidence = similarity  # [MOD] confidence = similarity (0~1)
+
+                # 나중 정렬을 위해 중간 구조로 보관
+                scored.append((doc, raw_score, similarity, confidence))
+
+            # =========================
+            # [MOD] 유사도 내림차순 정렬
+            # =========================
+            scored.sort(key=lambda x: x[2], reverse=True)
+
+            # 상위 3개만 반환 (정책 유지)
+            top = scored[:3]
+            chunk_results: List[ChunkResult] = []
+            for rank, (doc, raw_score, similarity, confidence) in enumerate(top, start=1):
+                chunk_results.append(ChunkResult(
+                    chunk=TextChunk(content=doc.page_content, metadata=doc.metadata),
                     confidence=confidence,
                     domain="general",
                     search_method="faiss",
                     metadata=self._create_general_metadata(
-                        doc, i + 1, distance_score, similarity, preferred_type
-                    )
-                )
-                
-                chunk_results.append(chunk_result)
-            
-            # 4. confidence 순으로 재정렬 후 상위 3개 반환
-            chunk_results.sort(key=lambda x: x.confidence, reverse=True)
-            top_chunks = chunk_results[:3]
-            
+                        doc=doc,
+                        rank=rank,
+                        distance_score=raw_score,       # 원시 점수 그대로 유지
+                        similarity_score=similarity,    # 변환된 유사도(0~1)
+                        preferred_type=preferred_type
+                    ) | {"score_mode": score_mode}       # [MOD] 모드 기록(디버깅/튜닝용)
+                ))
+
+            # [MOD] 로그에 모드/탑유사도 추가
             logger.info(
-                f"일반 정보 검색 완료: {len(top_chunks)}개 반환 "
-                f"(최고 confidence: {top_chunks[0].confidence:.3f})"
+                f"일반 정보 검색 완료: {len(chunk_results)}개 반환 "
+                f"(score_mode={score_mode}, top_similarity={chunk_results[0].confidence:.3f})"
             )
-            
-            return top_chunks
-            
+            return chunk_results
+
         except Exception as e:
             logger.error(f"일반 정보 검색 실패: {e}")
             return []
