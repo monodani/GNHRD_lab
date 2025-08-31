@@ -1,290 +1,214 @@
 #!/usr/bin/env python3
 """
-경상남도인재개발원 RAG 챗봇 - 공지사항 벡터스토어 로더 v4.1
+경상남도인재개발원 RAG 챗봇 - 공지사항 벡터스토어 로더 (단순화 버전)
 
-notice.txt 파일 파싱 → 공지사항별 스마트 청크 생성 → FAISS 벡터스토어
+TextLoader + RecursiveCharacterTextSplitter → FAISS 벡터스토어 생성
 """
 
 import os
-import re
 import logging
-import hashlib
-import time
+import streamlit as st
 from pathlib import Path
-from typing import List, Dict, Any
-from datetime import datetime
 
-from config.config import EMBEDDING_MODEL
+from langchain_community.document_loaders import TextLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
 
 # =============================================================================
-# 🔧 파인튜닝 설정 구역 - 모든 설정값을 여기서 조정
+# 🔧 파인튜닝 설정 구역
 # =============================================================================
 
 # 경로 설정
-SOURCE_DIR = "data/notice"
+SOURCE_FILE = "data/notice/notice.txt"
 VECTORSTORE_DIR = "vectorstores/vectorstore_notice"
 INDEX_NAME = "notice_index"
 
-# 파일 설정
-NOTICE_FILE = "notice.txt"
-SECTION_DELIMITER = "---"
+# 청킹 설정
+CHUNK_SIZE = 500
+CHUNK_OVERLAP = 50
 
-# 파싱 설정
-MAX_TITLE_LENGTH = 50
-MAX_CONTENT_LENGTH = 200  # Citation 모델 호환성
-CACHE_TTL_HOURS = 6
-
-# 공지사항 타입 분류 키워드 (우선순위 순)
-NOTICE_TYPE_KEYWORDS = {
-    "evaluation": ["평가", "과제", "제출기한", "마감일", "점수", "채점"],
-    "enrollment": ["입교", "교육생", "준비물", "체크리스트", "지참", "입소"],
-    "recruitment": ["모집", "신청", "접수", "선발", "모집공고"],
-    "schedule": ["일정", "시간표", "변경", "연기", "취소"],
-    "urgent": ["긴급", "즉시", "반드시", "중요", "주의", "필수"],
-    "general": ["공지", "안내", "알림", "공고"]
-}
-
-# 중요도 추출 키워드
-IMPORTANCE_KEYWORDS = {
-    "urgent": ["긴급", "즉시", "반드시", "중요"],
-    "deadline": ["마감", "기한", "제출", "감점"],
-    "normal": ["안내", "공지", "알림"]
-}
-
-# 청크 생성 템플릿 (기존 로직 보존)
-NOTICE_TEMPLATE = """[{title}] {notice_type} 공지사항
-
-{content}
-
-유형: {notice_type}
-중요도: {importance}
-처리일: {date}
-
-#공지사항 #경남인재개발원 #{notice_type}"""
+# 임베딩 모델
+EMBEDDING_MODEL = "text-embedding-3-large"
 
 # =============================================================================
 
 logger = logging.getLogger(__name__)
 
 
-class TextChunk:
-    def __init__(self, text: str, source_id: str, metadata: Dict[str, Any] = None):
-        self.text = text
-        self.source_id = source_id
-        self.metadata = metadata or {}
+def get_api_key() -> str:
+    """Streamlit Secrets에서 API 키 가져오기"""
+    try:
+        # Streamlit Secrets 우선
+        if hasattr(st, 'secrets') and st.secrets:
+            api_key = st.secrets.get("OPENAI_API_KEY")
+            if api_key:
+                return api_key
+    except Exception:
+        pass
+    
+    # 환경변수 대안
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY를 Streamlit Secrets 또는 환경변수에 설정해주세요")
+    
+    return api_key
 
 
 class NoticeLoader:
+    """단순화된 공지사항 로더"""
+    
     def __init__(self):
-        # API 키 및 임베딩
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        if not self.api_key:
-            raise ValueError("OPENAI_API_KEY 환경변수가 필요합니다")
-        
-        self.embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL, api_key=self.api_key)
+        """로더 초기화"""
+        self.api_key = get_api_key()
+        self.embeddings = OpenAIEmbeddings(
+            model=EMBEDDING_MODEL,
+            api_key=self.api_key
+        )
         
         # 경로 설정
-        root = Path(__file__).parent.parent
-        self.source_dir = root / SOURCE_DIR
-        self.vectorstore_dir = root / VECTORSTORE_DIR
+        self.project_root = Path(__file__).parent.parent
+        self.source_file = self.project_root / SOURCE_FILE
+        self.vectorstore_dir = self.project_root / VECTORSTORE_DIR
+        
+        # 디렉터리 생성
         self.vectorstore_dir.mkdir(parents=True, exist_ok=True)
         
-        logger.info(f"NoticeLoader 초기화: {EMBEDDING_MODEL}")
+        logger.info(f"NoticeLoader 초기화 완료: {EMBEDDING_MODEL}")
     
     def build_vectorstore(self, force_rebuild: bool = False) -> bool:
         """벡터스토어 빌드"""
         try:
-            if not force_rebuild and not self._needs_rebuild():
-                logger.info("벡터스토어가 최신상태입니다")
+            # 파일 존재 확인
+            if not self.source_file.exists():
+                raise FileNotFoundError(f"소스 파일이 없습니다: {self.source_file}")
+            
+            # 기존 벡터스토어 확인
+            faiss_file = self.vectorstore_dir / f"{INDEX_NAME}.faiss"
+            pkl_file = self.vectorstore_dir / f"{INDEX_NAME}.pkl"
+            
+            if not force_rebuild and faiss_file.exists() and pkl_file.exists():
+                logger.info("기존 벡터스토어를 사용합니다")
                 return True
             
-            logger.info("벡터스토어 빌드 시작...")
-            start_time = time.time()
+            logger.info("🚀 벡터스토어 빌드 시작...")
             
-            # 데이터 처리
-            chunks = self._process_data()
+            # 1. 텍스트 로드
+            loader = TextLoader(
+                str(self.source_file),
+                encoding='utf-8'
+            )
+            documents = loader.load()
+            logger.info(f"✅ 문서 로드 완료: {len(documents)}개 문서")
             
-            # FAISS 생성
-            texts = [chunk.text for chunk in chunks]
-            metadatas = [chunk.metadata for chunk in chunks]
+            # 2. 텍스트 분할
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=CHUNK_SIZE,
+                chunk_overlap=CHUNK_OVERLAP,
+                separators=["\n\n", "\n", ".", "!", "?", ",", " ", ""]
+            )
+            chunks = text_splitter.split_documents(documents)
+            logger.info(f"✅ 텍스트 분할 완료: {len(chunks)}개 청크")
             
-            vectorstore = FAISS.from_texts(texts, self.embeddings, metadatas)
-            vectorstore.save_local(str(self.vectorstore_dir), INDEX_NAME)
+            # 3. 메타데이터 추가 (기존 시스템 호환성)
+            for i, chunk in enumerate(chunks):
+                chunk.metadata.update({
+                    'source_file': 'notice.txt',
+                    'chunk_id': i,
+                    'domain': 'notice',
+                    'chunk_type': 'notice'
+                })
             
-            # 해시 저장
-            self._save_hash()
+            # 4. FAISS 벡터스토어 생성
+            vectorstore = FAISS.from_documents(
+                chunks,
+                self.embeddings
+            )
+            logger.info(f"✅ 임베딩 완료: {len(chunks)}개 청크")
             
-            elapsed = time.time() - start_time
-            logger.info(f"빌드 완료: {len(chunks)}개 청크, {elapsed:.1f}초")
+            # 5. 벡터스토어 저장
+            vectorstore.save_local(
+                str(self.vectorstore_dir),
+                INDEX_NAME
+            )
+            logger.info(f"✅ 벡터스토어 저장 완료: {self.vectorstore_dir}")
+            
             return True
             
         except Exception as e:
-            logger.error(f"빌드 실패: {e}")
+            logger.error(f"❌ 벡터스토어 빌드 실패: {e}")
             raise
     
-    def _process_data(self) -> List[TextChunk]:
-        """notice.txt 파일 처리"""
-        notice_file = self.source_dir / NOTICE_FILE
-        
-        if not notice_file.exists():
-            raise ValueError(f"공지사항 파일 없음: {notice_file}")
-        
-        chunks = []
-        
+    def get_stats(self) -> dict:
+        """벡터스토어 통계 정보"""
         try:
-            # 파일 읽기
-            with open(notice_file, 'r', encoding='utf-8') as f:
-                content = f.read()
+            faiss_file = self.vectorstore_dir / f"{INDEX_NAME}.faiss"
+            pkl_file = self.vectorstore_dir / f"{INDEX_NAME}.pkl"
             
-            # 섹션별 분할
-            sections = [s.strip() for s in content.split(SECTION_DELIMITER) if s.strip()]
+            if not (faiss_file.exists() and pkl_file.exists()):
+                return {"exists": False}
             
-            for idx, section in enumerate(sections, 1):
-                chunk = self._create_notice_chunk(section, idx)
-                if chunk:
-                    chunks.append(chunk)
+            # 파일 크기 정보
+            faiss_size = faiss_file.stat().st_size / (1024 * 1024)  # MB
+            pkl_size = pkl_file.stat().st_size / (1024 * 1024)      # MB
             
-            if not chunks:
-                raise ValueError("처리할 공지사항이 없습니다")
-            
-            logger.info(f"공지사항 처리 완료: {len(chunks)}개 청크")
+            return {
+                "exists": True,
+                "faiss_size_mb": round(faiss_size, 2),
+                "pkl_size_mb": round(pkl_size, 2),
+                "total_size_mb": round(faiss_size + pkl_size, 2),
+                "source_file": str(self.source_file),
+                "vectorstore_dir": str(self.vectorstore_dir),
+                "chunk_settings": {
+                    "chunk_size": CHUNK_SIZE,
+                    "chunk_overlap": CHUNK_OVERLAP,
+                    "embedding_model": EMBEDDING_MODEL
+                }
+            }
             
         except Exception as e:
-            logger.error(f"공지사항 파일 처리 실패: {e}")
-            raise
-        
-        return chunks
-    
-    def _create_notice_chunk(self, section: str, notice_number: int) -> TextChunk:
-        """개별 공지사항 청크 생성"""
-        # 제목 추출
-        title = self._extract_title(section)
-        
-        # 타입 분류
-        notice_type = self._classify_notice_type(title, section)
-        
-        # 중요도 추출
-        importance = self._extract_importance(title, section)
-        
-        # 내용 정제 (Citation 모델 호환성)
-        content = section[:MAX_CONTENT_LENGTH] + "..." if len(section) > MAX_CONTENT_LENGTH else section
-        
-        # 템플릿 적용
-        text = NOTICE_TEMPLATE.format(
-            title=title,
-            notice_type=notice_type,
-            content=content.strip(),
-            importance=importance,
-            date=datetime.now().strftime("%Y-%m-%d")
-        )
-        
-        # 메타데이터
-        metadata = {
-            'source_file': NOTICE_FILE,
-            'notice_number': notice_number,
-            'notice_title': title,
-            'notice_type': notice_type,
-            'importance': importance,
-            'cache_ttl': CACHE_TTL_HOURS * 3600,
-            'processing_date': datetime.now().isoformat(),
-            'content': content,  # Citation 모델용
-            'chunk_type': 'notice'
-        }
-        
-        source_id = f'notice/{NOTICE_FILE}#section_{notice_number}'
-        return TextChunk(text, source_id, metadata)
-    
-    def _extract_title(self, text: str) -> str:
-        """제목 추출 (다양한 패턴 지원)"""
-        lines = text.strip().split('\n')
-        if not lines:
-            return "제목 없음"
-        
-        first_line = lines[0].strip()
-        
-        # 대괄호 패턴 우선 추출
-        bracket_match = re.search(r'\[(.*?)\]', first_line)
-        if bracket_match:
-            title = bracket_match.group(1).strip()
-            return title[:MAX_TITLE_LENGTH] if len(title) > MAX_TITLE_LENGTH else title
-        
-        # 첫 번째 줄을 제목으로 사용
-        title = first_line[:MAX_TITLE_LENGTH] if len(first_line) > MAX_TITLE_LENGTH else first_line
-        return title if title else "제목 없음"
-    
-    def _classify_notice_type(self, title: str, content: str) -> str:
-        """공지사항 타입 분류 (키워드 기반)"""
-        combined_text = (title + " " + content).lower()
-        
-        # 우선순위 순으로 검사
-        for notice_type, keywords in NOTICE_TYPE_KEYWORDS.items():
-            if any(keyword.lower() in combined_text for keyword in keywords):
-                return notice_type
-        
-        return "general"  # 기본값
-    
-    def _extract_importance(self, title: str, content: str) -> str:
-        """중요도 추출"""
-        combined_text = (title + " " + content).lower()
-        
-        # 긴급도 순으로 검사
-        for importance, keywords in IMPORTANCE_KEYWORDS.items():
-            if any(keyword.lower() in combined_text for keyword in keywords):
-                return importance
-        
-        return "normal"  # 기본값
-    
-    def _needs_rebuild(self) -> bool:
-        """재빌드 필요 여부"""
-        # FAISS 파일 확인
-        faiss_file = self.vectorstore_dir / f"{INDEX_NAME}.faiss"
-        pkl_file = self.vectorstore_dir / f"{INDEX_NAME}.pkl"
-        
-        if not (faiss_file.exists() and pkl_file.exists()):
-            return True
-        
-        # 해시 비교
-        hash_file = self.vectorstore_dir / ".source_hash"
-        if not hash_file.exists():
-            return True
-        
-        current_hash = self._calculate_hash()
-        with open(hash_file, 'r') as f:
-            stored_hash = f.read().strip()
-        
-        return current_hash != stored_hash
-    
-    def _calculate_hash(self) -> str:
-        """소스 해시 계산"""
-        hasher = hashlib.md5()
-        hasher.update(EMBEDDING_MODEL.encode())
-        
-        notice_file = self.source_dir / NOTICE_FILE
-        if notice_file.exists():
-            hasher.update(str(notice_file.stat().st_mtime).encode())
-            hasher.update(str(notice_file.stat().st_size).encode())
-        
-        return hasher.hexdigest()[:16]
-    
-    def _save_hash(self):
-        """현재 해시 저장"""
-        hash_file = self.vectorstore_dir / ".source_hash"
-        with open(hash_file, 'w') as f:
-            f.write(self._calculate_hash())
+            logger.error(f"통계 조회 실패: {e}")
+            return {"exists": False, "error": str(e)}
 
 
 def main():
-    """개발/테스트용 진입점"""
-    logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
+    """스크립트 실행 진입점"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
     
     try:
+        print("🌟 경상남도인재개발원 공지사항 벡터스토어 로더")
+        print("=" * 50)
+        
+        # 로더 초기화
         loader = NoticeLoader()
-        loader.build_vectorstore()
-        print("✅ 공지사항 벡터스토어 구축 완료")
+        
+        # 현재 상태 확인
+        stats = loader.get_stats()
+        if stats.get("exists"):
+            print(f"📁 기존 벡터스토어: {stats['total_size_mb']}MB")
+            
+            rebuild = input("기존 벡터스토어를 재빌드하시겠습니까? (y/N): ").lower() == 'y'
+            if not rebuild:
+                print("✅ 기존 벡터스토어를 유지합니다")
+                return
+        
+        # 빌드 실행
+        success = loader.build_vectorstore(force_rebuild=True)
+        
+        if success:
+            # 최종 통계
+            final_stats = loader.get_stats()
+            print("\n🎉 빌드 완료!")
+            print(f"📊 벡터스토어 크기: {final_stats['total_size_mb']}MB")
+            print(f"📁 저장 위치: {final_stats['vectorstore_dir']}")
+        else:
+            print("❌ 빌드 실패")
+            
     except Exception as e:
-        print(f"❌ 실패: {e}")
+        print(f"❌ 오류 발생: {e}")
         exit(1)
 
 
