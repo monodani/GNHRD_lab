@@ -1,6 +1,6 @@
 {
-  "timestamp": "2025-08-27T11:18:15.191773",
-  "elapsed_time": "0:01:14.277651",
+  "timestamp": "2025-08-31T05:49:25.725230",
+  "elapsed_time": "0:01:08.846792",
   "total_domains": 6,
   "successful_domains": 6,
   "failed_domains": 0,
@@ -8,7 +8,7 @@
   "results": {
     "cyber": {
       "status": "success",
-      "elapsed_time": 10.841891050338745,
+      "elapsed_time": 11.977835416793823,
       "stats": {
         "domain": "cyber",
         "path": "vectorstores/vectorstore_cyber",
@@ -16,29 +16,29 @@
         "faiss_size_mb": 17.58,
         "pkl_size_mb": 0.95,
         "total_size_mb": 18.53,
-        "last_modified": "2025-08-27T11:17:13.475098",
-        "build_time": 10.84,
-        "timestamp": "2025-08-27T11:17:13.488157"
+        "last_modified": "2025-08-31T05:48:30.487806",
+        "build_time": 11.98,
+        "timestamp": "2025-08-31T05:48:30.500723"
       }
     },
     "menu": {
       "status": "success",
-      "elapsed_time": 12.912438154220581,
+      "elapsed_time": 10.051400661468506,
       "stats": {
         "domain": "menu",
         "path": "vectorstores/vectorstore_menu",
         "vectorstore_exists": true,
-        "faiss_size_mb": 0.14,
+        "faiss_size_mb": 0.15,
         "pkl_size_mb": 0.0,
-        "total_size_mb": 0.14,
-        "last_modified": "2025-08-27T11:17:26.401243",
-        "build_time": 12.91,
-        "timestamp": "2025-08-27T11:17:26.403069"
+        "total_size_mb": 0.16,
+        "last_modified": "2025-08-31T05:48:40.552919",
+        "build_time": 10.05,
+        "timestamp": "2025-08-31T05:48:40.554788"
       }
     },
     "notice": {
       "status": "success",
-      "elapsed_time": 0.7315163612365723,
+      "elapsed_time": 1.0337111949920654,
       "stats": {
         "domain": "notice",
         "path": "vectorstores/vectorstore_notice",
@@ -46,14 +46,14 @@
         "faiss_size_mb": 0.19,
         "pkl_size_mb": 0.02,
         "total_size_mb": 0.21,
-        "last_modified": "2025-08-27T11:17:27.135252",
-        "build_time": 0.73,
-        "timestamp": "2025-08-27T11:17:27.136850"
+        "last_modified": "2025-08-31T05:48:41.588931",
+        "build_time": 1.03,
+        "timestamp": "2025-08-31T05:48:41.590912"
       }
     },
     "satisfaction": {
       "status": "success",
-      "elapsed_time": 18.438194274902344,
+      "elapsed_time": 21.365970849990845,
       "stats": {
         "domain": "satisfaction",
         "path": "vectorstores/vectorstore_unified_satisfaction",
@@ -61,29 +61,29 @@
         "faiss_size_mb": 40.36,
         "pkl_size_mb": 1.83,
         "total_size_mb": 42.19,
-        "last_modified": "2025-08-27T11:17:45.551480",
-        "build_time": 18.44,
-        "timestamp": "2025-08-27T11:17:45.577348"
+        "last_modified": "2025-08-31T05:49:02.931139",
+        "build_time": 21.37,
+        "timestamp": "2025-08-31T05:49:02.959318"
       }
     },
     "general": {
       "status": "success",
-      "elapsed_time": 13.146846055984497,
+      "elapsed_time": 7.440469980239868,
       "stats": {
         "domain": "general",
         "path": "vectorstores/vectorstore_general",
         "vectorstore_exists": true,
-        "faiss_size_mb": 0.62,
-        "pkl_size_mb": 0.06,
-        "total_size_mb": 0.68,
-        "last_modified": "2025-08-27T11:17:58.982624",
-        "build_time": 13.15,
-        "timestamp": "2025-08-27T11:17:58.984229"
+        "faiss_size_mb": 1.28,
+        "pkl_size_mb": 0.16,
+        "total_size_mb": 1.44,
+        "last_modified": "2025-08-31T05:49:10.560211",
+        "build_time": 7.44,
+        "timestamp": "2025-08-31T05:49:10.562999"
       }
     },
     "publish": {
       "status": "success",
-      "elapsed_time": 16.205578088760376,
+      "elapsed_time": 15.160163402557373,
       "stats": {
         "domain": "publish",
         "path": "vectorstores/vectorstore_unified_publish",
@@ -91,9 +91,9 @@
         "faiss_size_mb": 2.51,
         "pkl_size_mb": 0.32,
         "total_size_mb": 2.83,
-        "last_modified": "2025-08-27T11:18:15.187801",
-        "build_time": 16.21,
-        "timestamp": "2025-08-27T11:18:15.191755"
+        "last_modified": "2025-08-31T05:49:25.721367",
+        "build_time": 15.16,
+        "timestamp": "2025-08-31T05:49:25.725211"
       }
     }
   }
