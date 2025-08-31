@@ -36,7 +36,7 @@ INDEX_NAME = "general_index"
 
 # 파일 설정
 HAKCHIK_PDF = "hakchik.pdf"
-OPERATION_PDF = "operation_test.pdf"
+OPERATION_PDF = "operation.pdf"
 TELEPHONE_CSV = "task_telephone.csv"
 CSV_ENCODINGS = ['utf-8', 'cp949', 'euc-kr']
 
