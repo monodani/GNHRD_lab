@@ -439,40 +439,38 @@ def reset_session():
 # 시스템 초기화
 # =============================================================================
 
-@st.cache_data(ttl=3600)  # 1시간 캐시
+@st.cache_resource  # ttl 설정은 보통 불필요
 def initialize_system():
     """시스템 초기화 (인덱스 로드 등)"""
     try:
-        logger.info("🚀 벼리톡 시스템 초기화 시작")
+        logger.info("🚀 벼리톡 시스템 초기화 시작 (Resource Caching)")
         
         # 인덱스 사전 로드
         preload_result = preload_all_indexes()
         
         if not preload_result.get("success", False):
-            logger.warning(f"인덱스 로드 실패: {preload_result.get('error')}")
+            # 실패 시에도 결과를 반환하여 상태를 알림
+            logger.error(f"인덱스 로드 실패: {preload_result.get('error')}")
             return {
                 "success": False,
                 "error": preload_result.get("error", "Unknown error"),
-                "mode": "limited"
             }
         
-        # 헬스 체크
-        health_status = index_health_check()
+        # 헬스 체크는 캐싱하지 않는 것이 좋으므로 필요시 별도 호출
+        # health_status = index_health_check()
         
         return {
             "success": True,
-            "mode": "full",
-            "health_status": health_status,
             "loaded_domains": preload_result.get("loaded_domains", []),
-            "performance": preload_result.get("performance", {})
+            "performance": preload_result.get("performance", {}),
+            # "health_status": health_status # 필요하다면 포함
         }
         
     except Exception as e:
-        logger.error(f"시스템 초기화 실패: {e}")
+        logger.error(f"시스템 초기화 중 심각한 예외 발생: {e}")
         return {
             "success": False,
             "error": str(e),
-            "mode": "error"
         }
 
 # =============================================================================
