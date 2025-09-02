@@ -45,7 +45,7 @@ class NoticeLoader:
     
     def __init__(self):
         # API 키 확인
-        self.api_key = st.secrets.get("OPENAI_API_KEY")
+        self.api_key = os.environ.get('OPENAI_API_KEY')
         if not self.api_key:
             raise ValueError("OPENAI_API_KEY 환경변수가 필요합니다")
         
