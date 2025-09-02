@@ -7,6 +7,7 @@ publish.pdf → FAISS 벡터스토어 생성 (PDFPlumber 방식)
 
 import os
 import logging
+import streamlit as st
 from pathlib import Path
 
 try:
@@ -44,7 +45,7 @@ class PublishLoader:
     
     def __init__(self):
         # API 키 확인
-        self.api_key = os.getenv("OPENAI_API_KEY")
+        self.api_key = st.secrets.get("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OPENAI_API_KEY 환경변수가 필요합니다")
         
