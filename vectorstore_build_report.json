@@ -1,14 +1,14 @@
 {
-  "timestamp": "2025-09-02T03:39:34.055548",
-  "elapsed_time": "0:01:08.139769",
+  "timestamp": "2025-09-02T10:38:16.312947",
+  "elapsed_time": "0:00:44.574278",
   "total_domains": 6,
-  "successful_domains": 6,
-  "failed_domains": 0,
-  "success_rate": "100.0%",
+  "successful_domains": 5,
+  "failed_domains": 1,
+  "success_rate": "83.3%",
   "results": {
     "cyber": {
       "status": "success",
-      "elapsed_time": 14.981009483337402,
+      "elapsed_time": 8.327272415161133,
       "stats": {
         "domain": "cyber",
         "path": "vectorstores/vectorstore_cyber",
@@ -16,14 +16,14 @@
         "faiss_size_mb": 17.58,
         "pkl_size_mb": 0.95,
         "total_size_mb": 18.53,
-        "last_modified": "2025-09-02T03:38:42.361473",
-        "build_time": 14.98,
-        "timestamp": "2025-09-02T03:38:42.374067"
+        "last_modified": "2025-09-02T10:37:41.573207",
+        "build_time": 8.33,
+        "timestamp": "2025-09-02T10:37:41.585937"
       }
     },
     "menu": {
       "status": "success",
-      "elapsed_time": 11.929025650024414,
+      "elapsed_time": 12.691142082214355,
       "stats": {
         "domain": "menu",
         "path": "vectorstores/vectorstore_menu",
@@ -31,14 +31,14 @@
         "faiss_size_mb": 0.15,
         "pkl_size_mb": 0.0,
         "total_size_mb": 0.16,
-        "last_modified": "2025-09-02T03:38:54.303506",
-        "build_time": 11.93,
-        "timestamp": "2025-09-02T03:38:54.305654"
+        "last_modified": "2025-09-02T10:37:54.277317",
+        "build_time": 12.69,
+        "timestamp": "2025-09-02T10:37:54.279629"
       }
     },
     "notice": {
       "status": "success",
-      "elapsed_time": 0.14883780479431152,
+      "elapsed_time": 0.15069198608398438,
       "stats": {
         "domain": "notice",
         "path": "vectorstores/vectorstore_notice",
@@ -46,29 +46,18 @@
         "faiss_size_mb": 0.19,
         "pkl_size_mb": 0.02,
         "total_size_mb": 0.21,
-        "last_modified": "2025-09-02T03:37:42.083343",
+        "last_modified": "2025-09-02T10:36:50.372714",
         "build_time": 0.15,
-        "timestamp": "2025-09-02T03:38:54.654268"
+        "timestamp": "2025-09-02T10:37:54.622748"
       }
     },
     "satisfaction": {
-      "status": "success",
-      "elapsed_time": 19.189247369766235,
-      "stats": {
-        "domain": "satisfaction",
-        "path": "vectorstores/vectorstore_unified_satisfaction",
-        "vectorstore_exists": true,
-        "faiss_size_mb": 40.36,
-        "pkl_size_mb": 1.83,
-        "total_size_mb": 42.19,
-        "last_modified": "2025-09-02T03:39:13.819553",
-        "build_time": 19.19,
-        "timestamp": "2025-09-02T03:39:13.846582"
-      }
+      "status": "failed",
+      "error": "처리할 데이터가 없습니다"
     },
     "general": {
       "status": "success",
-      "elapsed_time": 5.008211374282837,
+      "elapsed_time": 6.051141977310181,
       "stats": {
         "domain": "general",
         "path": "vectorstores/vectorstore_general",
@@ -76,14 +65,14 @@
         "faiss_size_mb": 1.28,
         "pkl_size_mb": 0.16,
         "total_size_mb": 1.44,
-        "last_modified": "2025-09-02T03:39:18.994566",
-        "build_time": 5.01,
-        "timestamp": "2025-09-02T03:39:18.996870"
+        "last_modified": "2025-09-02T10:38:01.417383",
+        "build_time": 6.05,
+        "timestamp": "2025-09-02T10:38:01.420154"
       }
     },
     "publish": {
       "status": "success",
-      "elapsed_time": 15.05668306350708,
+      "elapsed_time": 14.890796422958374,
       "stats": {
         "domain": "publish",
         "path": "vectorstores/vectorstore_unified_publish",
@@ -91,9 +80,9 @@
         "faiss_size_mb": 2.51,
         "pkl_size_mb": 0.32,
         "total_size_mb": 2.83,
-        "last_modified": "2025-09-02T03:39:34.051603",
-        "build_time": 15.06,
-        "timestamp": "2025-09-02T03:39:34.055527"
+        "last_modified": "2025-09-02T10:38:16.309522",
+        "build_time": 14.89,
+        "timestamp": "2025-09-02T10:38:16.312922"
       }
     }
   }
