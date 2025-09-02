@@ -7,6 +7,7 @@ menu.csv → FAISS 벡터스토어 생성 (CSV 방식)
 
 import os
 import logging
+import streamlit as st
 from pathlib import Path
 
 try:
