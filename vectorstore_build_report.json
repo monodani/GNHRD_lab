@@ -1,6 +1,6 @@
 {
-  "timestamp": "2025-09-02T10:38:16.312947",
-  "elapsed_time": "0:00:44.574278",
+  "timestamp": "2025-09-02T10:41:24.118861",
+  "elapsed_time": "0:00:47.003859",
   "total_domains": 6,
   "successful_domains": 5,
   "failed_domains": 1,
@@ -8,7 +8,7 @@
   "results": {
     "cyber": {
       "status": "success",
-      "elapsed_time": 8.327272415161133,
+      "elapsed_time": 11.462400674819946,
       "stats": {
         "domain": "cyber",
         "path": "vectorstores/vectorstore_cyber",
@@ -16,14 +16,14 @@
         "faiss_size_mb": 17.58,
         "pkl_size_mb": 0.95,
         "total_size_mb": 18.53,
-        "last_modified": "2025-09-02T10:37:41.573207",
-        "build_time": 8.33,
-        "timestamp": "2025-09-02T10:37:41.585937"
+        "last_modified": "2025-09-02T10:40:50.406710",
+        "build_time": 11.46,
+        "timestamp": "2025-09-02T10:40:50.417646"
       }
     },
     "menu": {
       "status": "success",
-      "elapsed_time": 12.691142082214355,
+      "elapsed_time": 13.612031698226929,
       "stats": {
         "domain": "menu",
         "path": "vectorstores/vectorstore_menu",
@@ -31,14 +31,14 @@
         "faiss_size_mb": 0.15,
         "pkl_size_mb": 0.0,
         "total_size_mb": 0.16,
-        "last_modified": "2025-09-02T10:37:54.277317",
-        "build_time": 12.69,
-        "timestamp": "2025-09-02T10:37:54.279629"
+        "last_modified": "2025-09-02T10:41:04.030766",
+        "build_time": 13.61,
+        "timestamp": "2025-09-02T10:41:04.032165"
       }
     },
     "notice": {
       "status": "success",
-      "elapsed_time": 0.15069198608398438,
+      "elapsed_time": 0.15010976791381836,
       "stats": {
         "domain": "notice",
         "path": "vectorstores/vectorstore_notice",
@@ -46,9 +46,9 @@
         "faiss_size_mb": 0.19,
         "pkl_size_mb": 0.02,
         "total_size_mb": 0.21,
-        "last_modified": "2025-09-02T10:36:50.372714",
+        "last_modified": "2025-09-02T10:39:52.996454",
         "build_time": 0.15,
-        "timestamp": "2025-09-02T10:37:54.622748"
+        "timestamp": "2025-09-02T10:41:04.425356"
       }
     },
     "satisfaction": {
@@ -57,7 +57,7 @@
     },
     "general": {
       "status": "success",
-      "elapsed_time": 6.051141977310181,
+      "elapsed_time": 4.871516704559326,
       "stats": {
         "domain": "general",
         "path": "vectorstores/vectorstore_general",
@@ -65,14 +65,14 @@
         "faiss_size_mb": 1.28,
         "pkl_size_mb": 0.16,
         "total_size_mb": 1.44,
-        "last_modified": "2025-09-02T10:38:01.417383",
-        "build_time": 6.05,
-        "timestamp": "2025-09-02T10:38:01.420154"
+        "last_modified": "2025-09-02T10:41:10.014772",
+        "build_time": 4.87,
+        "timestamp": "2025-09-02T10:41:10.017029"
       }
     },
     "publish": {
       "status": "success",
-      "elapsed_time": 14.890796422958374,
+      "elapsed_time": 14.09987473487854,
       "stats": {
         "domain": "publish",
         "path": "vectorstores/vectorstore_unified_publish",
@@ -80,9 +80,9 @@
         "faiss_size_mb": 2.51,
         "pkl_size_mb": 0.32,
         "total_size_mb": 2.83,
-        "last_modified": "2025-09-02T10:38:16.309522",
-        "build_time": 14.89,
-        "timestamp": "2025-09-02T10:38:16.312922"
+        "last_modified": "2025-09-02T10:41:24.115819",
+        "build_time": 14.1,
+        "timestamp": "2025-09-02T10:41:24.118839"
       }
     }
   }
