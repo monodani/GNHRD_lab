@@ -24,10 +24,10 @@ sys.path.insert(0, str(project_root))
 
 # 로더 매핑 (순서: 성공 가능성 높은 순)
 LOADERS = {
-    'cyber': 'modules.loader_cyber.CyberLoader',
+    # 'cyber': 'modules.loader_cyber.CyberLoader',
     'menu': 'modules.loader_menu.MenuLoader', 
     'notice': 'modules.loader_notice.NoticeLoader',
-    'satisfaction': 'modules.loader_satisfaction.SatisfactionLoader',
+    # 'satisfaction': 'modules.loader_satisfaction.SatisfactionLoader',
     'general': 'modules.loader_general.GeneralLoader',
     'publish': 'modules.loader_publish.PublishLoader'
 }
@@ -78,8 +78,8 @@ def get_domain_stats(domain: str) -> Dict[str, Any]:
     
     # 🗂️ 도메인별 벡터스토어 경로 매핑 (satisfaction, publish는 unified)
     vectorstore_paths = {
-        'satisfaction': 'vectorstores/vectorstore_unified_satisfaction',
-        'publish': 'vectorstores/vectorstore_unified_publish',
+        # 'satisfaction': 'vectorstores/vectorstore_satisfaction',
+        # 'publish': 'vectorstores/vectorstore_publish',
         'cyber': 'vectorstores/vectorstore_cyber',
         'general': 'vectorstores/vectorstore_general',
         'notice': 'vectorstores/vectorstore_notice',
