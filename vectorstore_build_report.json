@@ -1,6 +1,6 @@
 {
-  "timestamp": "2025-09-02T14:48:29.997901",
-  "elapsed_time": "0:00:41.762915",
+  "timestamp": "2025-09-03T00:17:18.516971",
+  "elapsed_time": "0:00:45.604026",
   "total_domains": 4,
   "successful_domains": 4,
   "failed_domains": 0,
@@ -8,7 +8,7 @@
   "results": {
     "menu": {
       "status": "success",
-      "elapsed_time": 1.5436656475067139,
+      "elapsed_time": 3.1272006034851074,
       "stats": {
         "domain": "menu",
         "path": "vectorstores/vectorstore_menu",
@@ -16,14 +16,14 @@
         "faiss_size_mb": 0.04,
         "pkl_size_mb": 0.0,
         "total_size_mb": 0.04,
-        "last_modified": "2025-09-02T14:47:51.065255",
-        "build_time": 1.54,
-        "timestamp": "2025-09-02T14:47:51.067374"
+        "last_modified": "2025-09-03T00:16:37.458498",
+        "build_time": 3.13,
+        "timestamp": "2025-09-03T00:16:37.460687"
       }
     },
     "notice": {
       "status": "success",
-      "elapsed_time": 1.2396204471588135,
+      "elapsed_time": 1.1922986507415771,
       "stats": {
         "domain": "notice",
         "path": "vectorstores/vectorstore_notice",
@@ -31,14 +31,14 @@
         "faiss_size_mb": 0.8,
         "pkl_size_mb": 0.06,
         "total_size_mb": 0.85,
-        "last_modified": "2025-09-02T14:47:52.306277",
-        "build_time": 1.24,
-        "timestamp": "2025-09-02T14:47:52.308308"
+        "last_modified": "2025-09-03T00:16:38.652492",
+        "build_time": 1.19,
+        "timestamp": "2025-09-03T00:16:38.654363"
       }
     },
     "general": {
       "status": "success",
-      "elapsed_time": 9.656773328781128,
+      "elapsed_time": 11.43234920501709,
       "stats": {
         "domain": "general",
         "path": "vectorstores/vectorstore_general",
@@ -46,20 +46,20 @@
         "faiss_size_mb": 2.04,
         "pkl_size_mb": 0.16,
         "total_size_mb": 2.2,
-        "last_modified": "2025-09-02T14:48:01.965438",
-        "build_time": 9.66,
-        "timestamp": "2025-09-02T14:48:01.968732"
+        "last_modified": "2025-09-03T00:16:50.086438",
+        "build_time": 11.43,
+        "timestamp": "2025-09-03T00:16:50.090536"
       }
     },
     "publish": {
       "status": "success",
-      "elapsed_time": 28.028090000152588,
+      "elapsed_time": 28.42536687850952,
       "stats": {
         "domain": "publish",
         "error": "통계 수집 실패: 'publish'",
         "vectorstore_exists": false,
-        "build_time": 28.03,
-        "timestamp": "2025-09-02T14:48:29.997879"
+        "build_time": 28.43,
+        "timestamp": "2025-09-03T00:17:18.516948"
       }
     }
   }
