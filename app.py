@@ -109,14 +109,14 @@ def load_custom_css():
     <style>
     /* 전역 스타일 초기화 */
     .stApp {
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        background-color: #f8f9fa; /* 깔끔한 밝은 회색 배경 */
         font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     }
     
     /* 메인 컨테이너 */
     .main-container {
-        max-width: 1200px;
-        margin: 0 auto;
+        max-width: 900px;
+        margin: 0 auto; /* 좌우 여백을 자동으로 주어 중앙 정렬 */
         padding: 1rem;
     }
     
@@ -137,8 +137,8 @@ def load_custom_css():
     
     /* --- 헤더 벼리 이미지 스타일 추가 --- */
     .header-byeoli-avatar {
-        width: 60px;
-        height: 60px;
+        width: 80px;
+        height: 80px;
     }
     
     
@@ -161,18 +161,28 @@ def load_custom_css():
         text-align: left; /* 텍스트 왼쪽 정렬 */
     }
     
+    /* --- [신규 추가] 채팅 전체 영역을 감싸는 카드 --- */
+    .chat-area-card {
+        background: white; /* 흰색 배경 */
+        border-radius: 24px; /* 부드러운 곡률 */
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08); /* 세련된 그림자 효과 */
+        border: 1px solid #e5e7eb; /* 얇은 테두리 */
+        padding: 1rem; /* 내부 여백 */
+        margin-top: 1.5rem; /* 헤더와의 간격 */
+    }
+    
     /* 채팅 컨테이너 */
     .chat-container {
-        background: rgba(255, 255, 255, 0.9);
-        backdrop-filter: blur(20px);
-        border-radius: 20px;
-        padding: 2rem;
+        /* --- 수정: 배경과 그림자를 부모(.chat-area-card)에게 위임 --- */
+        background: transparent;
+        backdrop-filter: none;
+        box-shadow: none;
+        border: none;        
+        padding: 1rem;
         min-height: 400px; /* 최소 높이를 지정해 너무 작아지는 것을 방지 */
         max-height: 65vh;  /* 화면 높이의 65%를 최대로 사용 (px보다 유연함) */
         overflow-y: auto;
         margin-bottom: 1rem;
-        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.3);
     }
     
     /* 메시지 카드 */
@@ -270,12 +280,12 @@ def load_custom_css():
     
     /* 입력 영역 */
     .input-container {
-        background: rgba(255, 255, 255, 0.95);
-        backdrop-filter: blur(20px);
-        border-radius: 20px;
-        padding: 1.5rem;
-        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.3);
+        /* --- 수정: 배경과 그림자를 부모(.chat-area-card)에게 위임 --- */
+        background: transparent;
+        backdrop-filter: none;
+        box-shadow: none;
+        border: none;
+        padding: 1rem 0 0 0; /* 위쪽 패딩만 살짝 줌 */
     }
     
     /* 커스텀 버튼 */
@@ -998,6 +1008,9 @@ def main():
             st.session_state.system_initialized = True
             if not IS_PRODUCTION:
                 st.success("✅ 시스템 초기화 완료!")
+                
+    # --- 수정: 메인 컨테이너로 전체 UI 감싸기 ---
+    st.markdown('<div class="main-container">', unsafe_allow_html=True)                
     
     # UI 렌더링
     render_header()
@@ -1005,10 +1018,16 @@ def main():
     # 메인 레이아웃
     if IS_PRODUCTION:
         # 운영 모드: 심플한 단일 컬럼
+        # --- 수정: 채팅 영역을 하나의 카드로 묶기 ---
+        st.markdown('<div class="chat-area-card">', unsafe_allow_html=True)
+
+        
         render_chat_history()
         
         # 사용자 입력 처리
         user_input = render_input_section()
+        
+        st.markdown('</div>', unsafe_allow_html=True)
         
         if user_input:
             # 처리 중 표시
@@ -1094,7 +1113,9 @@ def main():
             if st.button("🗑️ 채팅 기록 삭제", use_container_width=True):
                 st.session_state.chat_history = []
                 st.rerun()
-
+                
+    # --- 수정: 메인 컨테이너 닫기 ---
+    st.markdown('</div>', unsafe_allow_html=True)
 # =============================================================================
 # 피드백 버튼 JavaScript (클라이언트 사이드)
 # =============================================================================
