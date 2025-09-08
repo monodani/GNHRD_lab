@@ -1,4 +1,3 @@
-# handlers/base/pandas_base_handler.py (v1.6 - 최종)
 import logging
 import hashlib
 import time
@@ -11,19 +10,22 @@ from config.config import get_config
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from langchain_openai import ChatOpenAI
 
+# [수정] OutputParsingError는 더 이상 직접 임포트하여 사용하지 않습니다.
+# from langchain_core.exceptions import OutputParsingError
 
 logger = logging.getLogger(__name__)
 
 AGENT_PROMPT_PREFIX_V2 = """
-You are a data analysis assistant working with a pandas DataFrame.
-Your primary goal is to extract relevant data and provide a clear, concise, text-based answer to the user's question.
+당신은 판다스 데이터프레임을 기반으로 하는 데이터분석 어시턴트입니다.
+당신의 주요 목표는 사용자의 질문에 맞춰 Pandas DataFrame에서 관련 데이터를 추출하고, 명확하고 간결한 텍스트 기반 답변을 제공하는 것입니다.
 
-Follow these rules STRICTLY:
-1.  **Analyze First:** Understand the user's question and determine what data is needed from the DataFrame.
-2.  **Text-Only Output:** Your final answer MUST BE plain text. DO NOT generate plots, visualizations, or Python code in the final output.
-3.  **Handle Analytical Queries Smartly:** For questions about "trends," "changes," "comparisons," or "summaries," you MUST find the underlying raw data that would be used for such analysis and present it clearly. A markdown table is an excellent format for this.
-4.  **Be Honest About Missing Data:** If the data to answer the question is not available, state that clearly.
-5.  **Simple Questions, Simple Answers:** For simple lookups, provide the direct answer.
+다음 규칙들을 반드시 준수하세요.
+- 먼저 분석하기: 사용자의 질문을 파악하고 DataFrame에서 어떤 데이터가 필요한지 결정합니다.
+- 텍스트만 출력하기: 최종 답변은 반드시 일반 텍스트여야 합니다. 최종 결과물에 플롯, 시각화 또는 Python 코드를 생성하지 마십시오.
+- 분석을 요하는 쿼리를 스마트하게 처리하기: '추세', '변화', '비교', 또는 '요약', '통계'와 관련된 질문의 경우, 이러한 분석에 사용될 원시 데이터를 찾아 명확하게 제시해야 합니다.
+  정형화 된 답변이 필요할 경우, 리스트업을 하는 정도로만 시인성 좋게 편집하여 출력하되, 사용자가 테이블 형태의 출력을 원할 경우에는 마크다운 테이블을 사용하도록 하세요.
+- 누락된 데이터에 대해 솔직하게 답변하기: 질문에 답할 데이터가 없는 경우, 그 사실을 명확하게 밝혀야 합니다.
+- 간단한 질문, 간단한 답변: 간단한 조회를 요청하는 쿼리 시 그에 대한 직접적인 답변을 제공합니다.
 """
 
 class BasePandasAgentHandler:
@@ -43,7 +45,7 @@ class BasePandasAgentHandler:
         self.cache: dict = {}
         self._load_data()
         self._init_agent()
-        logger.info(f"✅ {self.__class__.__name__} v1.7 초기화 완료 (도메인: {self.domain_name})")
+        logger.info(f"✅ {self.__class__.__name__} v2.0 (최종 수정) 초기화 완료 (도메인: {self.domain_name})")
 
     def _load_data(self):
         if not self.csv_path.exists():
@@ -86,19 +88,22 @@ class BasePandasAgentHandler:
             
             contextual_query = f"Context: {self.data_context}\n\nUser Question: {query}"
             
-            # [수정] agent.invoke 호출 방식을 변경합니다.
-            # 1. try-except OutputParsingError 블록을 제거합니다.
-            # 2. handle_parsing_errors=True 인자를 추가하여 에이전트가 자체적으로 파싱 오류를 처리하도록 합니다.
+            # 🔥 [최종 수정] LangChain 권장 방식 적용
+            # 1. try-except OutputParsingError 구문 제거
+            # 2. agent.invoke 호출 시 handle_parsing_errors=True 옵션을 반드시 추가
             agent_response = self.agent.invoke(
-                {"input": contextual_query}, 
-                handle_parsing_errors=True
+                {"input": contextual_query},
+                handle_parsing_errors=True  # 이 옵션이 핵심입니다.
             )
+            
+            # 이제 파싱 오류가 발생해도 agent_response['output']에 원본 텍스트가 담겨 반환됩니다.
             answer = agent_response.get('output', f"{self.domain_name} 정보를 조회하지 못했습니다.")
 
             self._cache_result(query, answer)
             return [self._create_chunk_result(answer)]
             
         except Exception as e:
+            # 이제 이곳은 정말 예상치 못한 심각한 오류가 발생했을 때만 실행됩니다.
             logger.error(f"❌ {self.domain_name} 분석 중 심각한 오류 발생: {e}")
             return []
 
