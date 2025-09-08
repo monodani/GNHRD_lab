@@ -171,7 +171,7 @@ class CentralOrchestrator:
         return HandlerResponse(answer=answer, confidence=0.95, domain="casual", success=True)
 
     def _handle_no_handler(self, query: str) -> HandlerResponse:
-        general_answer = "죄송하지만 해당 분야에 대한 전문적인 답변을 드리기 어렵습니다."
+        general_answer = "죄송하지만 해당 분야에 대해 전문적인 답변을 드리기 어렵습니다."
         if self.client:
             try:
                 response = self.client.chat.completions.create(
@@ -184,16 +184,17 @@ class CentralOrchestrator:
         answer_template = """경상남도인재개발원 자료 모음집에서는 알 수 없는 내용입니다.
 
 제가 알려드릴 수 있는 내용은 다음과 같습니다:
+
 - 교육과정 및 일정 안내
 - 교육 만족도 통계 및 성과 분석
 - 사이버 교육과정 소개
-- 공지사항 및 최신 소식
-- 구내식당 메뉴 및 식단표
-- 각종 발행물 및 공식 자료
+- 공지사항 안내 및 경남인재개발원 소개
+- 경남인재개발원 구내식당 메뉴 안내
+- 각종 발행물 및 공식자료 정보 제공
 
-**그래서 정확하지 않을 수 있지만 답변드리자면,** {general_answer}
+그래서 정확하지 않을 수 있지만 답변드리자면, {general_answer}
 
-더 정확한 정보가 필요하시면 경상남도인재개발원(055-254-2051)으로 문의해주세요."""
+경남인재개발원 관련 질문을 다시 주시거나 직원과 연결을 원하시면 경상남도인재개발원(055-254-2051)으로 문의해주세요."""
         final_answer = answer_template.format(general_answer=general_answer)
         return HandlerResponse(answer=final_answer, confidence=0.3, domain="general", success=True)
         
@@ -201,42 +202,75 @@ class CentralOrchestrator:
         if not self.client:
             return HandlerResponse(answer="현재 AI 서비스를 사용할 수 없습니다.", confidence=0.0, domain="error", success=False)
         
-        # 🔥 [핵심 수정] 청크 소스에 따라 내용을 다르게 구성합니다.
+        # --- [포인트 1: '참고 자료'와 '대화 기록' 변수 분리 및 순서 명확화] ---
+        # 설명: LLM에게 정보를 논리적인 순서(대화 맥락 -> 참고 자료)로 제공하기 위해
+        #       두 변수를 분리하여 관리합니다. 이렇게 하면 프롬프트 템플릿의 가독성과 유지보수성이 향상됩니다.
+        
+        # [수정 시작 1]
+        # 1. '참고 자료' 생성
         reference_list = []
         for i, chunk in enumerate(chunks[:5]):
             source = chunk.chunk.metadata.get("source", "")
             content = chunk.chunk.content
 
-            # Pandas Agent가 분석한 결과는 자르지 않고 거의 그대로 사용합니다. (최대 2000자)
             if "analysis" in source:
                 reference_list.append(f"--- 참고자료 #{i+1} (출처: {chunk.domain} 데이터 분석) ---\n{content}")
-            # 벡터 검색 결과는 기존처럼 요약합니다.
             else:
                 reference_list.append(f"--- 참고자료 #{i+1} (출처: {chunk.domain}) ---\n{content}...")
         
-        references = "\n\n".join(reference_list)
+        references_text = "\n\n".join(reference_list)
 
-        context = self.conversation_manager.get_context_for_llm(conv_id)
-        if context.strip():
-            references += f"\n\n[이전 대화]\n{context}"
+        # 2. '대화 기록' 가져오기
+        llm_context = self.conversation_manager.get_context_for_llm(conv_id)
+        # [수정 끝 1]
+
+        # --- [포인트 2: 최종 프롬프트 템플릿 변수명 통일] ---
+        # 설명: 프롬프트 템플릿 내의 변수명 `{llm_context}`와 `{references}`가
+        #       실제 format 메서드에 전달될 변수명과 일치하도록 수정합니다.
+        #       이전 코드의 [이전 대화] 부분을 제거하고, [대화 기록]으로 일원화합니다.
         
-        final_prompt_template = """당신은 경상남도인재개발원의 전문 AI 어시스턴트 "벼리"입니다.
+        # [수정 시작 2]
+        final_prompt_template = """
+# 페르소나 설정(Persona) :
+당신의 이름은 "벼리"(영문명: Byeoli)이며, 경상남도인재개발원의 친절하고 유능한 AI 어시스턴트입니다. 항상 밝고 정중하고 상냥한 말투를 사용하지만, 새 대화가 시작할 때 **한 번만** 인사하세요.
 
-사용자 질문: {query}
+# 지침(Instruction) :
+아래에 제공되는 [대화 기록]과 [참고 자료]를 바탕으로 [사용자 질문]에 대해 답변해야 합니다. 다음 규칙을 반드시 지켜주세요.
 
-아래는 질문에 답변하기 위해 찾은 참고 자료입니다. 이 자료의 내용을 '최대한 활용'하여 질문에 답변해주세요.
-- 제시된 표(테이블)나 목록이 있다면, 그 내용을 빠짐없이 요약하거나 그대로 보여주세요.
-- 자료에 없는 내용은 절대 언급하지 마세요.
-- 정중하고 친근한 말투를 사용하세요.
+1.  **맥락 우선주의**: [대화 기록]을 먼저 분석해서 사용자가 무엇을 원하는지 정확히 파악하세요. 특히, 사용자가 '다른 것', '그거 말고', '추가로' 등의 표현을 사용하면 절대 이전에 했던 말을 반복하지 말고 새로운 정보를 제공해야 합니다.
+2.  **자료는 근거로만**: [참고 자료]는 답변의 근거로만 사용하고, 내용을 그대로 읊지 마세요. 질문에 답변하는 데 필요한 정보만 뽑아서 자연스러운 대화체로 가공해야 합니다.
+3.  **반복 금지**: 바로 이전 답변에서 이미 설명한 내용은 다시 반복하지 마세요. 예를 들어, 사용자가 행사에 대해 물어서 당신이 행사개요를 안내헸고, 이어서 사용자가 그 행사 참여 방법을 다시 물어보면 당신은 참여 방법만 알려주고 다시 행사 개요를 또 설명하지 마세요.
+4.  **정형화된 데이터가 포함된 답변 제공 시 목록 또 마크다운 테이블 활용가능** : 답변의 형태는 텍스트를 우선으로 취하되, 제공된 자료가 특성상 정형화된 데이터(표/테이블, 통계 및 수치형)라면 **목록** 형태 또는 **마크다운 테이블** 적극적으로 활용하세요.
 
-=== 참고 자료 ===
+---
+[대화 기록]
+{llm_context}
+
+---
+
+[참고 자료]
 {references}
-=================
 
-위 자료를 바탕으로 답변을 작성해주세요.
+---
+
+[사용자 질문]
+{query}
+
 
 답변:"""
-        prompt = final_prompt_template.format(query=query, references=references)
+        # [수정 끝 2]
+
+        # --- [포인트 3: format 메서드에 올바른 변수 전달] ---
+        # 설명: 위에서 분리하여 생성한 `llm_context`와 `references_text` 변수를
+        #       템플릿의 `{llm_context}`, `{references}` 자리에 정확히 전달합니다.
+        
+        # [수정 시작 3]
+        prompt = final_prompt_template.format(
+            llm_context=llm_context, 
+            references=references_text, 
+            query=query
+        )
+        # [수정 끝 3]
         
         try:
             response = self.client.chat.completions.create(
