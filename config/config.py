@@ -137,12 +137,12 @@ class AppConfig:
         "course_satisfaction": {
             "type": "pandas", 
             "class": "CourseSatisfactionHandler",
-            "description": "교육과정 운영현황 및 만족도 통걔, 종합 평가 분석 정보"
+            "description": "교육과정 운영현황 및 만족도 통계, 종합 평가 분석 정보"
         },
         "subject_satisfaction": {
             "type": "pandas", 
             "class": "SubjectSatisfactionHandler",
-            "description": "교과목 운영현황 및 강의 만족도 통계 및 강의 평가 분석 정보"
+            "description": "교과목 운영현황 및 강의 만족도 통계, 강의 평가 분석 정보"
         }, 
         "cyber": {
             "type": "pandas", 
