@@ -29,7 +29,7 @@ class CentralOrchestrator:
         self.final_model = self.config.OPENAI_MODEL
         self.max_workers = 8
         self.handler_timeout = 30
-        self.chunks_per_handler = 3
+        self.chunks_per_handler = 5
 
         self.client = None
         if OPENAI_AVAILABLE and self.config.OPENAI_API_KEY:
