@@ -111,6 +111,26 @@ class IndexManager:
             return None
         return self.vectorstores.get(domain)
 
+    # 🔥 [핵심 수정] health_check 메서드를 시스템 상태를 명확히 알려주도록 업그레이드
+    def health_check(self) -> Dict[str, Any]:
+        """
+        FAISS 인덱스 시스템의 상태를 상세하게 점검하여 반환합니다.
+        app.py의 사이드바 UI에 사용됩니다.
+        """
+        loaded_count = len(self.load_stats.get("loaded_domains", []))
+        total_count = len(self.faiss_domains)
+        
+        # 성공 조건: FAISS 도메인이 하나 이상 있고, 모든 도메인이 실패 없이 로드되었을 때
+        is_healthy = (total_count > 0) and (loaded_count == total_count)
+        
+        return {
+            "is_healthy": is_healthy,
+            "loaded_count": loaded_count,
+            "total_count": total_count,
+            "loaded_domains": self.load_stats.get("loaded_domains", []),
+            "failed_domains": self.load_stats.get("failed_domains", []),
+            "load_time": self.load_stats.get("load_time", 0)
+
 # --- 전역 함수들 ---
 _index_manager_instance = None
 def get_index_manager() -> IndexManager:
@@ -123,4 +143,4 @@ def preload_all_indexes() -> Dict[str, Any]:
     return get_index_manager().preload_all_indexes()
 
 def index_health_check() -> Dict[str, Any]:
-    return get_index_manager().load_stats
+    return get_index_manager().health_check()
