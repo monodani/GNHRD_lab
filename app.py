@@ -515,7 +515,7 @@ def render_sidebar():
         try:
             health = index_health_check()
             loaded = health.get('loaded_domains', 0)
-            total = health.get('total_domains', 6)
+            total = health.get('total_domains', 4)
             
             if loaded >= 3:
                 st.markdown(f'<span class="status-badge status-success">✅ 인덱스 {loaded}/{total}</span>', unsafe_allow_html=True)
