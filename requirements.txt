@@ -28,7 +28,7 @@ langchain-experimental
 # ====================================
 # 데이터 분석 및 처리
 pandas~=2.2.0
-numpy~=1.26.0
+numpy~=1.26.4
 PyPDF2
 pdfplumber>=0.7.0         # general_loader에서 사용 (PDFPlumber 방식)
 tabulate
@@ -92,6 +92,7 @@ openpyxl~=3.1.0
 # 예상 설치 크기: ~800MB
 # 호환성: Python 3.12+, Windows/Mac/Linux
 # Streamlit Cloud: ✅ 모든 패키지 지원
+
 
 
 
