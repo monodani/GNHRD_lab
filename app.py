@@ -22,9 +22,22 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-
+import base64 from pathlib import Path
 import streamlit as st
 
+def image_to_base64(image_path: str) -> str:
+    """이미지 파일을 Base64 문자열로 변환합니다."""
+    try:
+        path = Path(image_path)
+        if path.exists():
+            with open(path, "rb") as image_file:
+                encoded_string = base64.b64encode(image_file.read()).decode()
+                return f"data:image/png;base64,{encoded_string}"
+    except Exception as e:
+        # 이미지를 찾지 못할 경우 로깅하고 빈 문자열 반환
+        logger.error(f"이미지 인코딩 실패: {image_path} - {e}")
+        return ""
+        
 # 프로젝트 모듈
 try:
     from handlers.base_handler import process_query
@@ -47,11 +60,11 @@ IS_PRODUCTION = APP_MODE == 'production'
 
 # 벼리 이미지 (핵심 5개만)
 BYEOLI_IMAGES = {
-    "default": "assets/Byeoli/advicing_Byeoli.png",     # 기본/상담
-    "happy": "assets/Byeoli/happy_Byeoli.png",          # 긍정 응답
-    "sorry": "assets/Byeoli/sorry_Byeoli.png",          # 오류/사과
-    "excited": "assets/Byeoli/excited_Byeoli.png",      # 환영/식단
-    "typing": "assets/Byeoli/typing_Byeoli.png"         # 처리 중
+    "default": image_to_base64("assets/Byeoli/advicing_Byeoli.png"),
+    "happy": image_to_base64("assets/Byeoli/happy_Byeoli.png"),
+    "sorry": image_to_base64("assets/Byeoli/sorry_Byeoli.png"),
+    "excited": image_to_base64("assets/Byeoli/excited_Byeoli.png"),
+    "typing": image_to_base64("assets/Byeoli/typing_Byeoli.png")
 }
 
 # 스트리밍 설정
@@ -108,6 +121,10 @@ def load_custom_css():
     
     /* 헤더 카드 */
     .header-card {
+        display: flex; /* Flexbox 레이아웃 사용 */
+        align-items: center; /* 수직 중앙 정렬 */
+        justify-content: center; /* 수평 중앙 정렬 */
+        gap: 20px; /* 이미지와 텍스트 사이 간격 */
         background: rgba(255, 255, 255, 0.95);
         backdrop-filter: blur(20px);
         border-radius: 24px;
@@ -115,24 +132,32 @@ def load_custom_css():
         margin-bottom: 2rem;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
         border: 1px solid rgba(255, 255, 255, 0.2);
-        text-align: center;
     }
     
+    /* --- 헤더 벼리 이미지 스타일 추가 --- */
+    .header-byeoli-avatar {
+        width: 60px;
+        height: 60px;
+    }
+    
+    
     .header-title {
-        font-size: 2.5rem;
+        font-size: 2.2rem;
         font-weight: 700;
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         margin: 0;
         line-height: 1.2;
+        text-align: left; /* 텍스트 왼쪽 정렬 */
     }
     
     .header-subtitle {
-        font-size: 1.1rem;
+        font-size: 1.0rem;
         color: #6b7280;
         margin: 0.5rem 0 0 0;
         font-weight: 400;
+        text-align: left; /* 텍스트 왼쪽 정렬 */
     }
     
     /* 채팅 컨테이너 */
@@ -141,7 +166,8 @@ def load_custom_css():
         backdrop-filter: blur(20px);
         border-radius: 20px;
         padding: 2rem;
-        height: 600px;
+        min-height: 400px; /* 최소 높이를 지정해 너무 작아지는 것을 방지 */
+        max-height: 65vh;  /* 화면 높이의 65%를 최대로 사용 (px보다 유연함) */
         overflow-y: auto;
         margin-bottom: 1rem;
         box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
@@ -479,19 +505,18 @@ def initialize_system():
 
 def render_header():
     """헤더 렌더링"""
-    col1, col2, col3 = st.columns([1, 6, 1])
-    
-    with col1:
-        if Path(BYEOLI_IMAGES["default"]).exists():
-            st.image(BYEOLI_IMAGES["default"], width=80)
-    
-    with col2:
-        st.markdown("""
-        <div class="header-card">
-            <h1 class="header-title">🌟 벼리톡@경상남도인재개발원</h1>
-            <p class="header-subtitle">경상남도인재개발원 AI 어시스턴트 - 궁금한 것이 있으시면 언제든 물어보세요!</p>
+    # 헤더 이미지도 Base64로 변환된 것을 사용
+    header_image_src = BYEOLI_IMAGES["default"]
+
+    st.markdown(f"""
+    <div class="header-card">
+        <img src="{header_image_src}" class="header-byeoli-avatar">
+        <div>
+            <h1 class="header-title">🌟벼리톡@경상남도인재개발원</h1>
+            <p class="header-subtitle">경상남도인재개발원 AI 어시스턴트 🌟벼리입니다! - 궁금한 것이 있으시면 언제든 물어보세요!</p>
         </div>
-        """, unsafe_allow_html=True)
+    </div>
+    """, unsafe_allow_html=True)
 
 def render_sidebar():
     """사이드바 렌더링 (개발 모드에서만)"""
@@ -603,6 +628,8 @@ def render_chat_history():
                
                # 피드백 버튼 (Streamlit 네이티브 버튼 사용)
                if message_id not in st.session_state.feedback_given:
+                   st.markdown('<div style="margin-top: -10px; margin-bottom: 10px;">', unsafe_allow_html=True)
+               
                    col1, col2, col3 = st.columns([1, 1, 4])
 
                    # 🔥 [핵심 수정] key 값에 메시지 순번(i)을 추가하여 고유성 보장
