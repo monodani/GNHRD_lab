@@ -1,6 +1,6 @@
-# utils/index_manager.py
+# utils/index_manager.py (v5.2 - SyntaxError 수정)
 """
-벼리톡@경상남도인재개발원(BYEOLI-TALK@GNHRD) - 인덱스 관리자 v5.0 (리팩토링)
+벼리톡@경상남도인재개발원(BYEOLI-TALK@GNHRD) - 인덱스 관리자 v5.2 (안정화)
 Config-Driven 기반 FAISS 벡터스토어 관리 시스템
 """
 import logging
@@ -11,7 +11,7 @@ from typing import Dict, Optional, Any, List
 from datetime import datetime
 
 # --- 프로젝트 모듈 ---
-from config.config import get_config, EMBEDDING_MODEL # 🔥 [수정] EMBEDDING_MODEL 임포트 추가
+from config.config import get_config, EMBEDDING_MODEL
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
 
@@ -41,7 +41,7 @@ class IndexManager:
         self.load_stats = {"loaded_domains": [], "failed_domains": [], "load_time": 0.0, "last_loaded": None}
         self.embeddings = self._init_embeddings()
         
-        logger.info(f"✅ IndexManager v5.0 초기화 완료 ({len(self.faiss_domains)}개 FAISS 도메인 지원)")
+        logger.info(f"✅ IndexManager v5.2 초기화 완료 ({len(self.faiss_domains)}개 FAISS 도메인 지원)")
         self._initialized = True
     
     def _init_embeddings(self) -> Optional[OpenAIEmbeddings]:
@@ -111,16 +111,9 @@ class IndexManager:
             return None
         return self.vectorstores.get(domain)
 
-    # 🔥 [핵심 수정] health_check 메서드를 시스템 상태를 명확히 알려주도록 업그레이드
     def health_check(self) -> Dict[str, Any]:
-        """
-        FAISS 인덱스 시스템의 상태를 상세하게 점검하여 반환합니다.
-        app.py의 사이드바 UI에 사용됩니다.
-        """
         loaded_count = len(self.load_stats.get("loaded_domains", []))
         total_count = len(self.faiss_domains)
-        
-        # 성공 조건: FAISS 도메인이 하나 이상 있고, 모든 도메인이 실패 없이 로드되었을 때
         is_healthy = (total_count > 0) and (loaded_count == total_count)
         
         return {
@@ -130,6 +123,7 @@ class IndexManager:
             "loaded_domains": self.load_stats.get("loaded_domains", []),
             "failed_domains": self.load_stats.get("failed_domains", []),
             "load_time": self.load_stats.get("load_time", 0)
+        } # 🔥 [수정] 빠져있던 '}'를 추가하여 문법 오류 해결
 
 # --- 전역 함수들 ---
 _index_manager_instance = None
@@ -143,4 +137,5 @@ def preload_all_indexes() -> Dict[str, Any]:
     return get_index_manager().preload_all_indexes()
 
 def index_health_check() -> Dict[str, Any]:
+    # 🔥 [수정] 업그레이드된 클래스 내부의 health_check 메서드를 호출하도록 변경
     return get_index_manager().health_check()
