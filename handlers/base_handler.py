@@ -1,6 +1,6 @@
 # handlers/base_handler.py
 """
-벼리톡@경상남도인재개발원(BYEOLI-TALK@GNHRD) - CentralOrchestrator v7.0 (리팩토링)
+벼리톡@경상남도인재개발원(BYEOLI-TALK@GNHRD) - CentralOrchestrator v7.1 (안정화)
 Config-Driven 기반 8개 핸들러 통합 처리 시스템
 """
 
@@ -9,9 +9,8 @@ import uuid
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# --- 프로젝트 모듈 ---
 from config.config import get_config
-from utils.contracts import QueryRequest, HandlerResponse, ChunkResult, TextChunk
+from utils.contracts import QueryRequest, HandlerResponse, ChunkResult
 from utils.conversation_manager import get_conversation_manager
 
 try:
@@ -58,7 +57,7 @@ class CentralOrchestrator:
 - 업무 질문: "HANDLERS: handler_name1, handler_name2, ..."
 
 답변:"""
-        logger.info(f"✅ CentralOrchestrator v7.0 초기화 완료 ({len(self.available_handlers)}개 핸들러 동적 로드)")
+        logger.info(f"✅ CentralOrchestrator v7.1 초기화 완료 ({len(self.available_handlers)}개 핸들러 동적 로드)")
 
     def handle(self, request: QueryRequest) -> HandlerResponse:
         query = getattr(request, 'query', '')
@@ -70,18 +69,23 @@ class CentralOrchestrator:
         
         routing_result = self._route_query(resolved_query)
         
-        if routing_result.startswith("CASUAL"):
+        # 🔥 [핵심 수정] 'startswith' 대신 'in'을 사용하여 라우팅 판별 로직의 유연성 확보
+        if "CASUAL" in routing_result:
             response = self._handle_casual(resolved_query)
-        elif routing_result.startswith("NO_HANDLER"):
+        elif "NO_HANDLER" in routing_result:
             response = self._handle_no_handler(resolved_query)
         else:
             handlers_to_run = self._parse_handlers(routing_result)
-            all_chunks = self._execute_handlers(resolved_query, handlers_to_run)
             
-            if not all_chunks:
-                response = self._handle_no_handler(resolved_query)
+            # 핸들러가 선택되지 않은 경우도 NO_HANDLER와 동일하게 처리
+            if not handlers_to_run:
+                 response = self._handle_no_handler(resolved_query)
             else:
-                response = self._generate_final_answer(resolved_query, all_chunks, conv_id)
+                all_chunks = self._execute_handlers(resolved_query, handlers_to_run)
+                if not all_chunks:
+                    response = self._handle_no_handler(resolved_query)
+                else:
+                    response = self._generate_final_answer(resolved_query, all_chunks, conv_id)
 
         message_id = self.conversation_manager.add_turn(
             conv_id=conv_id, user_message=query, bot_response=response.answer, confidence=response.confidence
@@ -102,11 +106,11 @@ class CentralOrchestrator:
             return "HANDLERS: general"
 
     def _parse_handlers(self, routing_result: str) -> List[str]:
-        if "HANDLERS:" not in routing_result: return ["general"]
+        if "HANDLERS:" not in routing_result: return [] # 핸들러가 없으면 빈 리스트 반환
         handler_part = routing_result.split("HANDLERS:")[1].strip()
         handlers = [h.strip() for h in handler_part.split(",")]
         valid_handlers = [h for h in handlers if h in self.available_handlers]
-        return valid_handlers if valid_handlers else ["general"]
+        return valid_handlers
 
     def _execute_handlers(self, query: str, handlers: List[str]) -> List[ChunkResult]:
         all_chunks = []
@@ -137,7 +141,6 @@ class CentralOrchestrator:
         all_chunks.sort(key=lambda x: x.confidence, reverse=True)
         return all_chunks[:10]
 
-    # 🔥 [수정] 아래 3개 메서드의 실제 구현부 복원
     def _handle_casual(self, query: str) -> HandlerResponse:
         answer = "안녕하세요! 벼리입니다. 저는 경상남도인재개발원의 AI 어시스턴트입니다. 무엇을 도와드릴까요?"
         if self.client:
