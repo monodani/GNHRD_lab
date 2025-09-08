@@ -745,7 +745,7 @@ def render_input_section():
             # label_visibility 추가하여 경고 해결
             user_input = st.text_input(
                 "메시지 입력",  # 빈 문자열 대신 의미있는 label 제공
-                placeholder="궁금한 것을 물어보세요... (예: 오늘 점심 메뉴는?, 2024년 교육 만족도는?)",
+                placeholder="궁금한 것을 물어보세요! (예 : 오늘 점심 메뉴는?, AI 관련 온라인 강의는 뭐가 있어?)",
                 label_visibility="collapsed"  # label을 숨김
             )
         
