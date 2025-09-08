@@ -23,8 +23,21 @@ from utils.contracts import ChunkResult, TextChunk
 from config.config import get_config
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from langchain_openai import ChatOpenAI
+from langchain.schema import OutputParsingError
 
 logger = logging.getLogger(__name__)
+
+AGENT_PROMPT_PREFIX_V2 = """
+You are a data analysis assistant working with a pandas DataFrame.
+Your primary goal is to extract relevant data and provide a clear, concise, text-based answer to the user's question.
+
+Follow these rules STRICTLY:
+1.  **Analyze First:** Understand the user's question and determine what data is needed from the DataFrame.
+2.  **Text-Only Output:** Your final answer MUST BE plain text. DO NOT generate plots, visualizations, or Python code in the final output.
+3.  **Handle Analytical Queries Smartly:** For questions about "trends," "changes," "comparisons," or "summaries," you MUST find the underlying raw data and present it clearly. A markdown table is an excellent format for this.
+4.  **Be Honest About Missing Data:** If the data to answer the question is not available, state that clearly.
+5.  **Simple Questions, Simple Answers:** For simple lookups, provide the direct answer.
+"""
 
 class BasePandasAgentHandler:
     """
@@ -70,32 +83,6 @@ class BasePandasAgentHandler:
         
         logger.info(f"✅ {self.__class__.__name__} v1.0 초기화 완료 (도메인: {self.domain_name})")
 
-    def search_chunks(self, query: str) -> List[ChunkResult]:
-        """
-        🎯 CentralOrchestrator와 연동되는 메인 실행 메서드.
-        캐시 확인 -> Agent 실행 -> 결과 캐싱 -> ChunkResult 반환의 흐름을 따릅니다.
-        """
-        try:
-            # 1. 캐시 확인
-            cached_result = self._get_cached_result(query)
-            if cached_result:
-                logger.info(f"⚡️ 캐시 히트: ({self.domain_name})")
-                return [self._create_chunk_result(cached_result)]
-            
-            # 2. 🔥 핵심 알고리즘: pandas agent 실행 (파싱 오류 발생 시에도 안전하게 처리)
-            agent_response = self.agent.invoke(query, handle_parsing_errors=True)
-            answer = agent_response.get('output', f"{self.domain_name} 정보를 조회하지 못했습니다.")
-            
-            # 3. 캐시 저장
-            self._cache_result(query, answer)
-            
-            # 4. ✅ base_handler가 수집할 ChunkResult 형태로 변환하여 반환
-            return [self._create_chunk_result(answer)]
-            
-        except Exception as e:
-            logger.error(f"❌ {self.domain_name} 분석 실패: {e}")
-            return [] # 실패 시 빈 리스트 반환
-
     def _load_data(self):
         """CSV 데이터 로드 (UTF-8, CP949, EUC-KR 순서로 인코딩 자동 감지)"""
         if not self.csv_path.exists():
@@ -118,10 +105,42 @@ class BasePandasAgentHandler:
         
         llm = ChatOpenAI(model=self.llm_model, temperature=self.llm_temperature)
         
-        # 🔥 Agent 생성: LLM이 DataFrame을 다룰 수 있도록 설정
+        # 🔥 [핵심 수정] 더 이상 지원되지 않는 handle_parsing_errors 인자를 완전히 제거합니다.
         self.agent = create_pandas_dataframe_agent(
-            llm, self.df, verbose=False, allow_dangerous_code=True
+            llm, 
+            self.df, 
+            prefix=AGENT_PROMPT_PREFIX_V2,
+            verbose=False, 
+            allow_dangerous_code=True
         )
+
+    def search_chunks(self, query: str) -> List[ChunkResult]:
+        if not self.agent:
+            return []
+            
+        try:
+            cached_result = self._get_cached_result(query)
+            if cached_result:
+                return [self._create_chunk_result(cached_result)]
+            
+            contextual_query = f"Context: {self.data_context}\n\nUser Question: {query}"
+            
+            # 🔥 [핵심 수정] agent.invoke()를 try-except 블록으로 감싸서 직접 오류를 처리합니다.
+            try:
+                agent_response = self.agent.invoke(contextual_query)
+                answer = agent_response.get('output', f"{self.domain_name} 정보를 조회하지 못했습니다.")
+            except OutputParsingError as e:
+                # 파싱 오류가 발생하면, 오류 메시지에서 LLM의 "진짜 답변"만 추출하여 사용합니다.
+                logger.warning(f"⚠️ {self.domain_name}에서 파싱 오류 발생. 오류 메시지에서 답변을 추출합니다. 오류: {e}")
+                answer = str(e).split("Could not parse LLM output: `")[-1].strip().replace("`", "")
+
+            self._cache_result(query, answer)
+            return [self._create_chunk_result(answer)]
+            
+        except Exception as e:
+            # 그 외의 예외는 여전히 기록합니다.
+            logger.error(f"❌ {self.domain_name} 분석 중 심각한 오류 발생: {e}")
+            return []    
 
     def _get_cached_result(self, query: str) -> Optional[str]:
         """메모리 캐시에서 결과 조회"""
