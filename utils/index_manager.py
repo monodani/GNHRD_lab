@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import Dict, Optional, Any, List
 from datetime import datetime
+import traceback
 
 # --- 프로젝트 모듈 ---
 from config.config import get_config, EMBEDDING_MODEL
@@ -85,8 +86,16 @@ class IndexManager:
             return True
             
         except Exception as e:
-            logger.error(f"❌ {domain} FAISS 로드 실패: {e}")
-            return False
+            # logger.error(f"❌ {domain} FAISS 로드 실패: {e}")
+            
+            detailed_error = traceback.format_exc()
+            logger.error(f"❌ {domain} FAISS 로드 중 심각한 오류 발생: {e}\n{detailed_error}")
+            
+            # 화면에 직접 에러를 출력하기 위해 st.expander 사용
+            import streamlit as st 
+            st.expander(f"🚨 {domain} 로드 실패 - 상세 에러 로그").code(detailed_error)
+
+            return False            
     
     def preload_all_indexes(self) -> Dict[str, Any]:
         logger.info(f"🚀 FAISS 인덱스 사전 로드 시작: {self.faiss_domains}")
