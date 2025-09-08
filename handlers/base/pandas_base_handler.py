@@ -11,7 +11,12 @@ from config.config import get_config
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from langchain_openai import ChatOpenAI
 # 🔥 [핵심 수정] OutputParsingError의 새로운, 정확한 위치에서 import 합니다.
-from langchain_core.exceptions import OutputParsingError
+try:
+    # 최신 버전 (langchain-core >= 0.1.25) 경로
+    from langchain_core.exceptions import OutputParsingError
+except ImportError:
+    # 이전 버전과의 호환성을 위한 경로
+    from langchain.output_parsers.base import OutputParsingError
 
 logger = logging.getLogger(__name__)
 
