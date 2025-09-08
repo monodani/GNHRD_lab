@@ -994,6 +994,16 @@ def main():
     st.write(f"Notice 도메인 예상 전체 경로: `{config.get_vectorstore_path('notice')}`")
     st.error("------------------------------")
     # --- ▲▲▲ 디버깅 코드 추가 끝 ▲▲▲ ---
+    # --- ▼▼▼ [최종 확인] 실제 폴더 목록 출력 ▼▼▼ ---
+    try:
+        vectorstore_list = os.listdir(config.VECTORSTORE_DIR)
+        st.info(f"실제 `vectorstores` 폴더 내용: `{vectorstore_list}`")
+    except FileNotFoundError:
+        st.warning(f"`{config.VECTORSTORE_DIR}` 폴더를 찾을 수 없습니다!")
+    # --- ▲▲▲ 최종 확인 끝 ▲▲▲ ---
+
+    st.error("------------------------------")
+    # --- ▲▲▲ 디버깅 코드 추가 끝 ▲▲▲ ---
     
     # CSS 로드
     load_custom_css()
