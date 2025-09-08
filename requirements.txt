@@ -21,6 +21,8 @@ langchain-openai~=0.2.0
 # 벡터 검색 엔진 (CPU 버전)
 faiss-cpu~=1.8.0
 
+langchain-experimental
+
 # ====================================
 # 📊 데이터 처리
 # ====================================
@@ -90,6 +92,7 @@ openpyxl~=3.1.0
 # 예상 설치 크기: ~800MB
 # 호환성: Python 3.12+, Windows/Mac/Linux
 # Streamlit Cloud: ✅ 모든 패키지 지원
+
 
 
 
