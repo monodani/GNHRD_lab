@@ -150,7 +150,7 @@ class Conversation:
     """대화 세션 (conversation_manager 전용)"""
     id: str
     turns: List[ConversationTurn] = field(default_factory=list)
-    summary: str = ""
+    # summary: str = ""
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     
@@ -206,7 +206,7 @@ class ConversationContext(BaseModel):
     turns: List[ChatTurn] = Field(default_factory=list)
     entities: Dict[str, List[str]] = Field(default_factory=dict)
     current_topic: Optional[str] = None
-    summary: Optional[str] = None
+    # summary: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     
