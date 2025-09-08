@@ -137,12 +137,12 @@ class AppConfig:
         "course_satisfaction": {
             "type": "pandas", 
             "class": "CourseSatisfactionHandler",
-            "description": "교육과정 만족도 및 종합 평가 분석 정보"
+            "description": "교육과정 운영현황 및 만족도 통걔, 종합 평가 분석 정보"
         },
         "subject_satisfaction": {
             "type": "pandas", 
             "class": "SubjectSatisfactionHandler",
-            "description": "교과목별 강의 만족도 및 평가 분석 정보"
+            "description": "교과목 운영현황 및 강의 만족도 통계 및 강의 평가 분석 정보"
         }, 
         "cyber": {
             "type": "pandas", 
@@ -168,7 +168,7 @@ class AppConfig:
         "notice": {
             "type": "faiss", 
             "class": "NoticeHandler",
-            "description": "공지사항, 알림, 최신 소식, 경남인재개발원 소개 및 현황 정보, 벼리 소개, 금주 교육과정 설명"
+            "description": "공지사항, 알림, 최신 소식, 경남인재개발원 소개 및 현황 정보, 벼리 소개, 금주 교육과정 안내"
         },
         "menu": {
             "type": "faiss", 
