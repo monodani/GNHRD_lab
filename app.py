@@ -179,7 +179,7 @@ def load_custom_css():
         box-shadow: none;
         border: none;        
         padding: 1rem;
-        min-height: 400px; /* 최소 높이를 지정해 너무 작아지는 것을 방지 */
+        # min-height: 400px; /* 최소 높이를 지정해 너무 작아지는 것을 방지 */
         max-height: 65vh;  /* 화면 높이의 65%를 최대로 사용 (px보다 유연함) */
         overflow-y: auto;
         margin-bottom: 1rem;
