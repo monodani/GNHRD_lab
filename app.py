@@ -12,7 +12,7 @@ Architecture.md 기준 모던 트렌디 UI/UX
 - 별도 관리자 대시보드
 
 작성자: 이다니엘 from 경상남도인재개발원
-최종 수정: 2025-08-21
+최종 수정: 2025-09-08
 """
 
 import os
@@ -70,11 +70,11 @@ SESSION_TIMEOUT_HOURS = 24   # 세션 만료 시간
 # 🔧 파인튜닝 설정 구역 끝
 # =============================================================================
 
-# 로깅 설정
-logging.basicConfig(
-    level=logging.WARNING if IS_PRODUCTION else logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# # 로깅 설정
+# logging.basicConfig(
+#     level=logging.WARNING if IS_PRODUCTION else logging.INFO,
+#     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+# )
 logger = logging.getLogger(__name__)
 
 # Streamlit 페이지 설정
