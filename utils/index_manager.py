@@ -33,15 +33,14 @@ EMBEDDING_MODEL = "text-embedding-3-large"
 
 # 도메인 설정 (6개 핸들러)
 SUPPORTED_DOMAINS = [
-    "satisfaction", "cyber", "publish", 
-    "general", "notice", "menu"
+    "publish", "general", "notice", "menu"
 ]
 
 # 벡터스토어 경로 매핑 (satisfaction만 예외)
 VECTORSTORE_PATH_MAPPING = {
-    "satisfaction": "vectorstore_unified_satisfaction",
-    "cyber": "vectorstore_cyber",
-    "publish": "vectorstore_unified_publish",
+    # "satisfaction": "vectorstore_satisfaction",
+    # "cyber": "vectorstore_cyber",
+    "publish": "vectorstore_publish",
     "general": "vectorstore_general",
     "notice": "vectorstore_notice",
     "menu": "vectorstore_menu"
@@ -262,7 +261,7 @@ class IndexManager:
         도메인별 벡터스토어 반환 (핸들러들이 사용하는 메인 API)
         
         Args:
-            domain: 도메인명 (satisfaction, cyber, publish, general, notice, menu)
+            domain: 도메인명 (publish, general, notice, menu)
             
         Returns:
             Optional[FAISS]: 벡터스토어 또는 None
