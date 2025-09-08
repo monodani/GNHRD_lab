@@ -187,7 +187,7 @@ class AppConfig:
             "llm_model": "gpt-4o",
             "llm_temperature": 0.1,
             "cache_ttl_seconds": 3600,
-            "confidence_score": 0.9  # 직접 답변이므로 높은 신뢰도 부여
+            "confidence_score": 0.9,  # 직접 답변이므로 높은 신뢰도 부여      
         },
         "faiss": {
             "default_k": 3,
@@ -200,6 +200,14 @@ class AppConfig:
         "cyber": {"csv_path": "data/cyber/cyber.csv"},
         "schedule": {"csv_path": "data/schedule/schedule.csv"},
         "publish": {"k": 5} # 발행물은 더 많이 검색하도록 기본값(3)을 오버라이드
+    })
+
+    # 🔥 [신규] FAISS 벡터스토어 실제 경로 매핑
+    VECTORSTORE_PATH_MAPPING: Dict[str, str] = field(default_factory=lambda: {
+        "general": "vectorstore_general",
+        "publish": "vectorstore_publish",
+        "notice": "vectorstore_notice",
+        "menu": "vectorstore_menu"
     })
 
     # =============================================================================
@@ -296,6 +304,10 @@ class AppConfig:
         return self.ENABLE_FEEDBACK and self.FIRESTORE_KEY is not None
 
     def get_vectorstore_path(self, domain: str) -> Path:
+        """[리팩토링] 도메인별 벡터스토어 경로를 매핑을 통해 정확히 반환"""
+        dir_name = self.VECTORSTORE_PATH_MAPPING.get(domain)
+        if not dir_name:
+            raise ValueError(f"'{domain}'에 대한 벡터스토어 경로가 config에 정의되지 않았습니다.")
         return self.VECTORSTORE_DIR / f"vectorstore_{domain}"
 
 # =============================================================================
