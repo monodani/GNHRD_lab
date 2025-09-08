@@ -28,7 +28,7 @@ class CentralOrchestrator:
         self.routing_model = self.config.OPENAI_MODEL
         self.final_model = self.config.OPENAI_MODEL
         self.max_workers = 8
-        self.handler_timeout = 10
+        self.handler_timeout = 20
         self.chunks_per_handler = 2
 
         self.client = None
