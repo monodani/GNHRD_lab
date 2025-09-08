@@ -33,8 +33,8 @@ EMBEDDING_MODEL = "text-embedding-3-large"
 EMBEDDING_DIMENSIONS = 3072
 
 # 텍스트 분할 설정
-CHUNK_SIZE = 500
-CHUNK_OVERLAP = 50
+CHUNK_SIZE = 350
+CHUNK_OVERLAP = 70
 
 # =============================================================================
 
