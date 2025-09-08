@@ -1,16 +1,4 @@
-# handlers/base/pandas_base_handler.py
-"""
-벼리톡@경상남도인재개발원 - Pandas Agent 기반 핸들러 v1.0 (리팩토링)
-모든 Pandas Agent 핸들러의 공통 로직을 포함하는 부모 클래스
-
-설계 원칙:
-- DRY(Don't Repeat Yourself): 중복 코드를 제거하고 상속을 통해 재사용
-- 설정 중앙화: 모든 설정값은 config.py에서 로드
-- 단일 책임: 이 클래스는 CSV 데이터를 로드하고, Agent를 실행하며, 결과를 캐싱하는 책임만 가짐
-
-작성자: 이다니엘 from 경상남도인재개발원 (Gemini AI 리팩토링)
-최종 수정: 2025-09-08
-"""
+# handlers/base/pandas_base_handler.py (v1.6 - 최종)
 import logging
 import hashlib
 import time
@@ -18,12 +6,12 @@ import pandas as pd
 from pathlib import Path
 from typing import List, Optional
 
-# --- 프로젝트 모듈 ---
 from utils.contracts import ChunkResult, TextChunk
 from config.config import get_config
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from langchain_openai import ChatOpenAI
-from langchain.schema import OutputParsingError
+# 🔥 [핵심 수정] OutputParsingError의 새로운, 정확한 위치에서 import 합니다.
+from langchain_core.exceptions import OutputParsingError
 
 logger = logging.getLogger(__name__)
 
@@ -34,60 +22,35 @@ Your primary goal is to extract relevant data and provide a clear, concise, text
 Follow these rules STRICTLY:
 1.  **Analyze First:** Understand the user's question and determine what data is needed from the DataFrame.
 2.  **Text-Only Output:** Your final answer MUST BE plain text. DO NOT generate plots, visualizations, or Python code in the final output.
-3.  **Handle Analytical Queries Smartly:** For questions about "trends," "changes," "comparisons," or "summaries," you MUST find the underlying raw data and present it clearly. A markdown table is an excellent format for this.
+3.  **Handle Analytical Queries Smartly:** For questions about "trends," "changes," "comparisons," or "summaries," you MUST find the underlying raw data that would be used for such analysis and present it clearly. A markdown table is an excellent format for this.
 4.  **Be Honest About Missing Data:** If the data to answer the question is not available, state that clearly.
 5.  **Simple Questions, Simple Answers:** For simple lookups, provide the direct answer.
 """
 
 class BasePandasAgentHandler:
-    """
-    Pandas Agent 핸들러의 모든 공통 기능을 제공하는 부모 클래스
-    자식 클래스는 __init__에서 자신의 domain_name만 지정해주면 됩니다.
-    """
-    
     def __init__(self, domain_name: str):
-        """
-        핸들러 초기화. 중앙 설정(config.py)에서 모든 정보를 가져옵니다.
-
-        Args:
-            domain_name (str): 핸들러의 고유 도메인 이름 (예: 'course_satisfaction')
-        """
-        # =============================================================================
-        # 🔧 1. 설정값 로드 (중앙 관리)
-        # =============================================================================
         config = get_config()
-        
-        # --- 핸들러 공통 설정 ---
-        common_settings = get_config().HANDLER_SETTINGS['pandas_agent']
+        common_settings = config.HANDLER_SETTINGS['pandas_agent']
         self.llm_model = common_settings['llm_model']
         self.llm_temperature = common_settings['llm_temperature']
         self.cache_ttl_seconds = common_settings['cache_ttl_seconds']
         self.confidence = common_settings['confidence_score']
-        
-        # --- 핸들러 개별 설정 ---
         handler_settings = config.HANDLER_SETTINGS[domain_name]
         self.domain_name = domain_name
         self.csv_path = Path(handler_settings['csv_path'])
-        self.cache_key_prefix = handler_settings.get('cache_key_prefix', '') # 특정 핸들러만 사용
-        
-        # =============================================================================
-        # ⚙️ 2. 내부 변수 및 Agent 초기화
-        # =============================================================================
+        self.data_context = common_settings.get('data_context', '')
         self.df: Optional[pd.DataFrame] = None
         self.agent = None
-        self.cache: dict = {}  # In-memory cache {query_hash: (result, timestamp)}
-        
-        # 🔥 핵심 로직: 데이터 로드 및 Agent 생성
+        self.cache: dict = {}
         self._load_data()
         self._init_agent()
-        
-        logger.info(f"✅ {self.__class__.__name__} v1.0 초기화 완료 (도메인: {self.domain_name})")
+        logger.info(f"✅ {self.__class__.__name__} v1.6 초기화 완료 (도메인: {self.domain_name})")
 
     def _load_data(self):
-        """CSV 데이터 로드 (UTF-8, CP949, EUC-KR 순서로 인코딩 자동 감지)"""
         if not self.csv_path.exists():
-            raise FileNotFoundError(f"데이터 파일을 찾을 수 없습니다: {self.csv_path}")
-
+            logger.warning(f"⚠️ 데이터 파일을 찾을 수 없습니다: {self.csv_path}.")
+            self.df = pd.DataFrame()
+            return
         for encoding in ['utf-8', 'cp949', 'euc-kr']:
             try:
                 self.df = pd.read_csv(self.csv_path, encoding=encoding)
@@ -95,17 +58,16 @@ class BasePandasAgentHandler:
                 return
             except UnicodeDecodeError:
                 continue
-        
-        raise Exception(f"모든 인코딩으로 CSV 파일 로드 실패: {self.csv_path}")
+        logger.error(f"❌ 모든 인코딩으로 CSV 파일 로드 실패: {self.csv_path}")
+        self.df = pd.DataFrame()
 
     def _init_agent(self):
-        """LangChain Pandas DataFrame Agent 초기화"""
-        if self.df is None:
-            raise ValueError("데이터프레임이 로드되지 않아 Agent를 초기화할 수 없습니다.")
+        if self.df is None or self.df.empty:
+            logger.warning(f"⚠️ {self.domain_name} 데이터프레임이 비어있어 Agent를 초기화할 수 없습니다.")
+            return
         
         llm = ChatOpenAI(model=self.llm_model, temperature=self.llm_temperature)
         
-        # 🔥 [핵심 수정] 더 이상 지원되지 않는 handle_parsing_errors 인자를 완전히 제거합니다.
         self.agent = create_pandas_dataframe_agent(
             llm, 
             self.df, 
@@ -125,12 +87,10 @@ class BasePandasAgentHandler:
             
             contextual_query = f"Context: {self.data_context}\n\nUser Question: {query}"
             
-            # 🔥 [핵심 수정] agent.invoke()를 try-except 블록으로 감싸서 직접 오류를 처리합니다.
             try:
                 agent_response = self.agent.invoke(contextual_query)
                 answer = agent_response.get('output', f"{self.domain_name} 정보를 조회하지 못했습니다.")
             except OutputParsingError as e:
-                # 파싱 오류가 발생하면, 오류 메시지에서 LLM의 "진짜 답변"만 추출하여 사용합니다.
                 logger.warning(f"⚠️ {self.domain_name}에서 파싱 오류 발생. 오류 메시지에서 답변을 추출합니다. 오류: {e}")
                 answer = str(e).split("Could not parse LLM output: `")[-1].strip().replace("`", "")
 
@@ -138,39 +98,33 @@ class BasePandasAgentHandler:
             return [self._create_chunk_result(answer)]
             
         except Exception as e:
-            # 그 외의 예외는 여전히 기록합니다.
             logger.error(f"❌ {self.domain_name} 분석 중 심각한 오류 발생: {e}")
-            return []    
+            return []
 
+    # --- 나머지 헬퍼 메서드는 변경 없음 ---
     def _get_cached_result(self, query: str) -> Optional[str]:
-        """메모리 캐시에서 결과 조회"""
-        query_hash = self.cache_key_prefix + hashlib.md5(query.encode()).hexdigest()
-        
+        query_hash = hashlib.md5(query.encode()).hexdigest()
         if query_hash in self.cache:
             result, timestamp = self.cache[query_hash]
             if time.time() - timestamp < self.cache_ttl_seconds:
                 return result
             else:
-                del self.cache[query_hash]  # 만료된 캐시 삭제
-        
+                del self.cache[query_hash]
         return None
 
     def _cache_result(self, query: str, result: str):
-        """메모리 캐시에 결과 저장 (오래된 데이터는 자동 삭제)"""
-        if len(self.cache) >= 100: # Max cache size
+        if len(self.cache) >= 100:
             oldest_key = min(self.cache.keys(), key=lambda k: self.cache[k][1])
             del self.cache[oldest_key]
-        
-        query_hash = self.cache_key_prefix + hashlib.md5(query.encode()).hexdigest()
+        query_hash = hashlib.md5(query.encode()).hexdigest()
         self.cache[query_hash] = (result, time.time())
 
     def _create_chunk_result(self, content: str) -> ChunkResult:
-        """Agent의 답변을 표준화된 ChunkResult 객체로 변환"""
         return ChunkResult(
             chunk=TextChunk(
                 content=content,
                 metadata={
-                    "source": f"{self.domain_name}_analysis", 
+                    "source": f"{self.domain_name}_analysis",
                     "handler": self.domain_name,
                     "data_source": self.csv_path.name
                 }
