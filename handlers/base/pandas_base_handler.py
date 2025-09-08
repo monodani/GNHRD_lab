@@ -10,11 +10,6 @@ from utils.contracts import ChunkResult, TextChunk
 from config.config import get_config
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from langchain_openai import ChatOpenAI
-# langchain_core.exceptions에서 OutputParsingError를 import 해야 합니다.
-try:
-    from langchain_core.exceptions import OutputParsingError
-except ImportError:
-    from langchain.output_parsers.base import OutputParsingError
 
 
 logger = logging.getLogger(__name__)
@@ -84,16 +79,21 @@ class BasePandasAgentHandler:
         if not self.agent:
             return []
             
-            # 🔥 [핵심 수정] OutputParsingError를 잡아서 답변을 구조합니다.
-            try:
-                agent_response = self.agent.invoke(
-                    {"input": contextual_query}
-                )
-                answer = agent_response.get('output', f"{self.domain_name} 정보를 조회하지 못했습니다.")
-            except OutputParsingError as e:
-                logger.warning(f"⚠️ {self.domain_name}에서 파싱 오류 발생. 오류 메시지에서 답변을 추출합니다. 오류: {e}")
-                # 오류 메시지에서 실제 LLM의 답변 부분만 파싱하여 가져옵니다.
-                answer = str(e).split("Could not parse LLM output: `")[-1].strip().replace("`", "")
+        try:
+            cached_result = self._get_cached_result(query)
+            if cached_result:
+                return [self._create_chunk_result(cached_result)]
+            
+            contextual_query = f"Context: {self.data_context}\n\nUser Question: {query}"
+            
+            # [수정] agent.invoke 호출 방식을 변경합니다.
+            # 1. try-except OutputParsingError 블록을 제거합니다.
+            # 2. handle_parsing_errors=True 인자를 추가하여 에이전트가 자체적으로 파싱 오류를 처리하도록 합니다.
+            agent_response = self.agent.invoke(
+                {"input": contextual_query}, 
+                handle_parsing_errors=True
+            )
+            answer = agent_response.get('output', f"{self.domain_name} 정보를 조회하지 못했습니다.")
 
             self._cache_result(query, answer)
             return [self._create_chunk_result(answer)]
@@ -101,7 +101,6 @@ class BasePandasAgentHandler:
         except Exception as e:
             logger.error(f"❌ {self.domain_name} 분석 중 심각한 오류 발생: {e}")
             return []
-
 
     # --- 나머지 헬퍼 메서드는 변경 없음 ---
     def _get_cached_result(self, query: str) -> Optional[str]:
