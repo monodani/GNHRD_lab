@@ -6,6 +6,7 @@ Config-Driven 기반 8개 핸들러 통합 처리 시스템
 
 import logging
 import uuid
+import re # 🔥 [신규/확인] 정규 표현식 라이브러리 import
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
