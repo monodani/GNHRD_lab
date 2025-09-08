@@ -1,251 +1,144 @@
-# handlers/base_handler.py
-"""
-벼리톡@경상남도인재개발원(BYEOLI-TALK@GNHRD) - CentralOrchestrator v7.1 (안정화)
-Config-Driven 기반 8개 핸들러 통합 처리 시스템
-"""
-
+# handlers/base/pandas_base_handler.py (v1.4 - 최종 완성)
 import logging
-import uuid
-import re # 🔥 [신규/확인] 정규 표현식 라이브러리 import
-from typing import List, Dict, Any, Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import hashlib
+import time
+import pandas as pd
+from pathlib import Path
+from typing import List, Optional
 
+from utils.contracts import ChunkResult, TextChunk
 from config.config import get_config
-from utils.contracts import QueryRequest, HandlerResponse, ChunkResult
-from utils.conversation_manager import get_conversation_manager
-
-try:
-    import openai
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
+from langchain_experimental.agents import create_pandas_dataframe_agent
+from langchain_openai import ChatOpenAI
 
 logger = logging.getLogger(__name__)
 
-class CentralOrchestrator:
-    def __init__(self):
-        self.config = get_config()
-        self.routing_model = self.config.OPENAI_MODEL
-        self.final_model = self.config.OPENAI_MODEL
-        self.max_workers = 8
-        self.handler_timeout = 10
-        self.chunks_per_handler = 2
+# Pandas Agent의 역할을 스마트하게 지시하는 프롬프트
+AGENT_PROMPT_PREFIX_V2 = """
+You are a data analysis assistant working with a pandas DataFrame.
+Your primary goal is to extract relevant data and provide a clear, concise, text-based answer to the user's question.
 
-        self.client = None
-        if OPENAI_AVAILABLE and self.config.OPENAI_API_KEY:
-            self.client = openai.OpenAI(api_key=self.config.OPENAI_API_KEY, timeout=30.0)
+Follow these rules STRICTLY:
+1.  **Analyze First:** Understand the user's question and determine what data is needed from the DataFrame.
+2.  **Text-Only Output:** Your final answer MUST BE plain text. DO NOT generate plots, visualizations, or Python code in the final output.
+3.  **Handle Analytical Queries Smartly:** For questions about "trends," "changes," "comparisons," or "summaries," you MUST find the underlying raw data that would be used for such analysis and present it clearly. A markdown table is an excellent format for this.
+4.  **Be Honest About Missing Data:** If the data to answer the question is not available in the DataFrame, you MUST state that clearly. For example: "The DataFrame does not contain data for [topic]."
+5.  **Simple Questions, Simple Answers:** For simple lookup questions (e.g., "What is the satisfaction score for course X?"), provide the direct answer.
+"""
+
+class BasePandasAgentHandler:
+    def __init__(self, domain_name: str):
+        config = get_config()
+        common_settings = config.HANDLER_SETTINGS['pandas_agent']
+        self.llm_model = common_settings['llm_model']
+        self.llm_temperature = common_settings['llm_temperature']
+        self.cache_ttl_seconds = common_settings['cache_ttl_seconds']
+        self.confidence = common_settings['confidence_score']
         
-        self.conversation_manager = get_conversation_manager()
-        self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
-        self.available_handlers = self.config.HANDLERS
+        handler_settings = config.HANDLER_SETTINGS[domain_name]
+        self.domain_name = domain_name
+        self.csv_path = Path(handler_settings['csv_path'])
+        self.data_context = common_settings.get('data_context', '')
         
-        handler_descriptions = [f"- {name}: {conf['description']}" for name, conf in self.available_handlers.items()]
-        self.routing_prompt_template = f"""다음 사용자 질문을 분석하여 가장 적절한 처리 방법을 결정해주세요.
-
-사용자 질문: {{query}}
-
-=== 처리 방법 ===
-1. CASUAL: 일상대화, 안부인사, 개인적 고민 등 업무와 무관한 대화
-2. NO_HANDLER: 경상남도인재개발원과 전혀 관련 없는 정보 요청
-3. HANDLERS: 아래 핸들러 중 관련된 것들 선택 (복수 선택 가능)
-
-=== 사용 가능한 핸들러 ===
-{chr(10).join(handler_descriptions)}
-
-출력 형식:
-- 일상대화: "CASUAL"
-- 관련 없는 정보: "NO_HANDLER" 
-- 업무 질문: "HANDLERS: handler_name1, handler_name2, ..."
-
-답변:"""
-        logger.info(f"✅ CentralOrchestrator v7.1 초기화 완료 ({len(self.available_handlers)}개 핸들러 동적 로드)")
-
-    def handle(self, request: QueryRequest) -> HandlerResponse:
-        query = getattr(request, 'query', '')
-        conv_id = getattr(request, 'conversation_id', f"conv_{uuid.uuid4().hex[:8]}")
+        self.df: Optional[pd.DataFrame] = None
+        self.agent = None
+        self.cache: dict = {}
         
-        resolved_query = self.conversation_manager.resolve_references(
-            query, self.conversation_manager.get_recent_context_for_reference(conv_id)
+        # 🔥 [핵심 복원] 데이터 로드 및 Agent 생성 호출
+        self._load_data()
+        self._init_agent()
+        
+        logger.info(f"✅ {self.__class__.__name__} v1.4 초기화 완료 (도메인: {self.domain_name})")
+
+    # 🔥 [핵심 복원] _load_data 메서드의 전체 구현
+    def _load_data(self):
+        """CSV 데이터 로드 (UTF-8, CP949, EUC-KR 순서로 인코딩 자동 감지)"""
+        if not self.csv_path.exists():
+            # 파일이 없을 경우 에러를 발생시키는 대신, 경고를 기록하고 빈 데이터프레임으로 초기화
+            logger.warning(f"⚠️ 데이터 파일을 찾을 수 없습니다: {self.csv_path}. 핸들러가 비활성화 상태로 작동합니다.")
+            self.df = pd.DataFrame() # 빈 데이터프레임
+            return
+
+        for encoding in ['utf-8', 'cp949', 'euc-kr']:
+            try:
+                self.df = pd.read_csv(self.csv_path, encoding=encoding)
+                logger.info(f"  - {self.domain_name} CSV 로드 성공 ({encoding}): {len(self.df)} 행")
+                return
+            except UnicodeDecodeError:
+                continue
+        
+        logger.error(f"❌ 모든 인코딩으로 CSV 파일 로드 실패: {self.csv_path}")
+        self.df = pd.DataFrame() # 로드 실패 시에도 빈 데이터프레임으로 초기화
+
+    def _init_agent(self):
+        """LangChain Pandas DataFrame Agent 초기화"""
+        # 데이터프레임이 비어있으면 Agent를 초기화하지 않고 경고만 남김
+        if self.df is None or self.df.empty:
+            logger.warning(f"⚠️ {self.domain_name} 데이터프레임이 비어있어 Agent를 초기화할 수 없습니다.")
+            return
+        
+        llm = ChatOpenAI(model=self.llm_model, temperature=self.llm_temperature)
+        
+        self.agent = create_pandas_dataframe_agent(
+            llm, 
+            self.df, 
+            prefix=AGENT_PROMPT_PREFIX_V2,
+            verbose=False, 
+            allow_dangerous_code=True,
+            handle_parsing_errors=True 
         )
-        
-        routing_result = self._route_query(resolved_query)
-        
-        # 🔥 [핵심 수정] 'startswith' 대신 'in'을 사용하여 라우팅 판별 로직의 유연성 확보
-        if "CASUAL" in routing_result:
-            response = self._handle_casual(resolved_query)
-        elif "NO_HANDLER" in routing_result:
-            response = self._handle_no_handler(resolved_query)
-        else:
-            handlers_to_run = self._parse_handlers(routing_result)
+
+    def search_chunks(self, query: str) -> List[ChunkResult]:
+        # Agent가 성공적으로 초기화되었는지 먼저 확인
+        if not self.agent:
+            logger.warning(f"⚠️ {self.domain_name} Agent가 초기화되지 않아 검색을 건너뜁니다.")
+            return []
             
-            # 핸들러가 선택되지 않은 경우도 NO_HANDLER와 동일하게 처리
-            if not handlers_to_run:
-                 response = self._handle_no_handler(resolved_query)
-            else:
-                all_chunks = self._execute_handlers(resolved_query, handlers_to_run)
-                if not all_chunks:
-                    response = self._handle_no_handler(resolved_query)
-                else:
-                    response = self._generate_final_answer(resolved_query, all_chunks, conv_id)
-
-        message_id = self.conversation_manager.add_turn(
-            conv_id=conv_id, user_message=query, bot_response=response.answer, confidence=response.confidence
-        )
-        response.message_id = message_id
-        return response
-
-    def _route_query(self, query: str) -> str:
-        if not self.client: return "HANDLERS: general"
         try:
-            prompt = self.routing_prompt_template.format(query=query)
-            response = self.client.chat.completions.create(
-                model=self.routing_model, messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=100
-            )
-            return response.choices[0].message.content.strip()
+            cached_result = self._get_cached_result(query)
+            if cached_result:
+                return [self._create_chunk_result(cached_result)]
+            
+            contextual_query = f"Context: {self.data_context}\n\nUser Question: {query}"
+            
+            agent_response = self.agent.invoke(contextual_query)
+            answer = agent_response.get('output', f"{self.domain_name} 정보를 조회하지 못했습니다.")
+            
+            self._cache_result(query, answer)
+            return [self._create_chunk_result(answer)]
+            
         except Exception as e:
-            logger.error(f"라우팅 실패: {e}")
-            return "HANDLERS: general"
-
-    def _parse_handlers(self, routing_result: str) -> List[str]:
-        """
-        [리팩토링] 라우팅 결과에서 핸들러 목록 추출 (정규 표현식으로 안정성 강화)
-        "답변: 'HANDLERS: general'" 과 같은 다양한 응답 형식도 처리 가능합니다.
-        """
-        # 🔥 [핵심 수정] 'HANDLERS:' 키워드 이후의 모든 단어를 추출하는 정규 표현식
-        # re.IGNORECASE는 HANDLERS, handlers 등 대소문자를 구분하지 않게 합니다.
-        match = re.search(r'HANDLERS:\s*(.*)', routing_result, re.IGNORECASE)
-        
-        if not match:
-            # 'HANDLERS:' 키워드를 찾지 못한 경우
+            logger.error(f"❌ {self.domain_name} 분석 실패: {e}")
             return []
 
-        handler_part = match.group(1).replace('"', '').replace("'", "") # 따옴표 제거
-        handlers = [h.strip() for h in handler_part.split(",")]
-        
-        # 유효한 핸들러 이름만 필터링
-        valid_handlers = [h for h in handlers if h in self.available_handlers]
-        return valid_handlers
+    # 🔥 [핵심 복원] 나머지 헬퍼 메서드들의 전체 구현
+    def _get_cached_result(self, query: str) -> Optional[str]:
+        query_hash = hashlib.md5(query.encode()).hexdigest()
+        if query_hash in self.cache:
+            result, timestamp = self.cache[query_hash]
+            if time.time() - timestamp < self.cache_ttl_seconds:
+                return result
+            else:
+                del self.cache[query_hash]
+        return None
 
-    def _execute_handlers(self, query: str, handlers: List[str]) -> List[ChunkResult]:
-        all_chunks = []
-        futures = {}
-        for handler_name in handlers:
-            try:
-                handler_config = self.available_handlers.get(handler_name)
-                if not handler_config: continue
-                
-                class_name = handler_config['class']
-                module_path = f"handlers.{handler_name}_handler"
-                module = __import__(module_path, fromlist=[class_name])
-                handler_class = getattr(module, class_name)
-                handler_instance = handler_class()
-                
-                future = self.executor.submit(handler_instance.search_chunks, query)
-                futures[future] = handler_name
-            except Exception as e:
-                logger.error(f"{handler_name} 핸들러 로드 실패: {e}")
-        
-        for future in as_completed(futures.keys(), timeout=self.handler_timeout):
-            try:
-                chunks = future.result() or []
-                all_chunks.extend(chunks[:self.chunks_per_handler])
-            except Exception as e:
-                logger.warning(f"{futures[future]} 핸들러 실행 오류: {e}")
-        
-        all_chunks.sort(key=lambda x: x.confidence, reverse=True)
-        return all_chunks[:10]
+    def _cache_result(self, query: str, result: str):
+        if len(self.cache) >= 100:
+            oldest_key = min(self.cache.keys(), key=lambda k: self.cache[k][1])
+            del self.cache[oldest_key]
+        query_hash = hashlib.md5(query.encode()).hexdigest()
+        self.cache[query_hash] = (result, time.time())
 
-    def _handle_casual(self, query: str) -> HandlerResponse:
-        answer = "안녕하세요! 벼리입니다. 저는 경상남도인재개발원의 AI 어시스턴트입니다. 무엇을 도와드릴까요?"
-        if self.client:
-            try:
-                response = self.client.chat.completions.create(
-                    model=self.final_model,
-                    messages=[{"role": "user", "content": f"친근한 AI 어시스턴트로서 다음 말에 답변해주세요: {query}"}],
-                    temperature=0.7, max_tokens=300
-                )
-                answer = response.choices[0].message.content.strip()
-            except Exception as e:
-                logger.warning(f"일상대화 LLM 호출 실패: {e}")
-        
-        return HandlerResponse(answer=answer, confidence=0.95, domain="casual", success=True)
-
-    def _handle_no_handler(self, query: str) -> HandlerResponse:
-        general_answer = "죄송하지만 해당 분야에 대한 전문적인 답변을 드리기 어렵습니다."
-        if self.client:
-            try:
-                response = self.client.chat.completions.create(
-                    model=self.final_model, messages=[{"role": "user", "content": query}], temperature=0.3, max_tokens=200
-                )
-                general_answer = response.choices[0].message.content.strip()
-            except Exception as e:
-                logger.warning(f"NO_HANDLER LLM 호출 실패: {e}")
-        
-        answer_template = """경상남도인재개발원 자료 모음집에서는 알 수 없는 내용입니다.
-
-제가 알려드릴 수 있는 내용은 다음과 같습니다:
-- 교육과정 및 일정 안내
-- 교육 만족도 및 성과 분석
-- 사이버교육 수강 방법
-- 공지사항 및 최신 소식
-- 구내식당 메뉴 및 식단표
-- 각종 발행물 및 공식 자료
-
-**그래서 정확하지 않을 수 있지만 답변드리자면,** {general_answer}
-
-더 정확한 정보가 필요하시면 경상남도인재개발원(055-254-2051)으로 문의해주세요."""
-        final_answer = answer_template.format(general_answer=general_answer)
-        return HandlerResponse(answer=final_answer, confidence=0.3, domain="general", success=True)
-        
-    def _generate_final_answer(self, query: str, chunks: List[ChunkResult], conv_id: str) -> HandlerResponse:
-        if not self.client:
-            return HandlerResponse(answer="현재 AI 서비스를 사용할 수 없습니다.", confidence=0.0, domain="error", success=False)
-        
-        references = "\n".join([f"• {chunk.chunk.content[:200]}..." for chunk in chunks[:5]])
-        context = self.conversation_manager.get_context_for_llm(conv_id)
-        if context.strip():
-            references += f"\n\n[이전 대화]\n{context}"
-        
-        final_prompt_template = """당신은 경상남도인재개발원의 전문 AI 어시스턴트 "벼리"입니다.
-
-사용자 질문: {query}
-
-참고 자료:
-{references}
-
-위 자료를 바탕으로 정확하고 친근한 답변을 작성해주세요.
-- 정중하고 친근한 말투 사용
-- 중요 정보는 구조화하여 제시
-- 관련 부서 연락처 포함 (가능한 경우)
-
-답변:"""
-        prompt = final_prompt_template.format(query=query, references=references)
-        
-        try:
-            response = self.client.chat.completions.create(
-                model=self.final_model, messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=800
-            )
-            max_confidence = max([c.confidence for c in chunks]) if chunks else 0.5
-            return HandlerResponse(
-                answer=response.choices[0].message.content.strip(),
-                confidence=max_confidence,
-                domain="unified",
-                success=True,
-                chunk_count=len(chunks)
-            )
-        except Exception as e:
-            logger.error(f"최종 답변 생성 실패: {e}")
-            return HandlerResponse(answer="죄송합니다. 답변 생성 중 오류가 발생했습니다.", confidence=0.0, domain="error", success=False)
-
-# --- 전역 함수들 ---
-_central_orchestrator: Optional[CentralOrchestrator] = None
-def get_central_orchestrator() -> CentralOrchestrator:
-    global _central_orchestrator
-    if _central_orchestrator is None:
-        _central_orchestrator = CentralOrchestrator()
-    return _central_orchestrator
-
-def process_query(query: str, conversation_id: Optional[str] = None) -> HandlerResponse:
-    orchestrator = get_central_orchestrator()
-    request = QueryRequest(query=query, conversation_id=conversation_id)
-    return orchestrator.handle(request)
+    def _create_chunk_result(self, content: str) -> ChunkResult:
+        return ChunkResult(
+            chunk=TextChunk(
+                content=content,
+                metadata={
+                    "source": f"{self.domain_name}_analysis",
+                    "handler": self.domain_name,
+                    "data_source": self.csv_path.name
+                }
+            ),
+            confidence=self.confidence,
+            domain=self.domain_name
+        )
