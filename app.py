@@ -597,6 +597,10 @@ def render_chat_history():
                # 피드백 버튼 (Streamlit 네이티브 버튼 사용)
                if message_id not in st.session_state.feedback_given:
                    col1, col2, col3 = st.columns([1, 1, 4])
+
+                   # 🔥 [핵심 수정] key 값에 메시지 순번(i)을 추가하여 고유성 보장
+                   unique_key_pos = f"pos_{message_id}_{i}"
+                   unique_key_neg = f"neg_{message_id}_{i}"
                    
                    with col1:
                        if st.button("👍 도움됨", key=f"pos_{message_id}", use_container_width=True):
