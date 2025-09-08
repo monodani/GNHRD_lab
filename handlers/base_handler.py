@@ -209,10 +209,10 @@ class CentralOrchestrator:
 
             # Pandas Agent가 분석한 결과는 자르지 않고 거의 그대로 사용합니다. (최대 2000자)
             if "analysis" in source:
-                reference_list.append(f"--- 참고자료 #{i+1} (출처: {chunk.domain} 데이터 분석) ---\n{content[:2000]}")
+                reference_list.append(f"--- 참고자료 #{i+1} (출처: {chunk.domain} 데이터 분석) ---\n{content}")
             # 벡터 검색 결과는 기존처럼 요약합니다.
             else:
-                reference_list.append(f"--- 참고자료 #{i+1} (출처: {chunk.domain}) ---\n{content[:300]}...")
+                reference_list.append(f"--- 참고자료 #{i+1} (출처: {chunk.domain}) ---\n{content}...")
         
         references = "\n\n".join(reference_list)
 
