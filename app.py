@@ -137,8 +137,8 @@ def load_custom_css():
     
     /* --- 헤더 벼리 이미지 스타일 추가 --- */
     .header-byeoli-avatar {
-        width: 150px;
-        height: 150px;
+        width: 80px;
+        height: 80px;
     }
     
     
