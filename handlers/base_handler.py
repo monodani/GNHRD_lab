@@ -201,7 +201,21 @@ class CentralOrchestrator:
         if not self.client:
             return HandlerResponse(answer="현재 AI 서비스를 사용할 수 없습니다.", confidence=0.0, domain="error", success=False)
         
-        references = "\n".join([f"• {chunk.chunk.content[:200]}..." for chunk in chunks[:5]])
+        # 🔥 [핵심 수정] 청크 소스에 따라 내용을 다르게 구성합니다.
+        reference_list = []
+        for i, chunk in enumerate(chunks[:5]):
+            source = chunk.chunk.metadata.get("source", "")
+            content = chunk.chunk.content
+
+            # Pandas Agent가 분석한 결과는 자르지 않고 거의 그대로 사용합니다. (최대 2000자)
+            if "analysis" in source:
+                reference_list.append(f"--- 참고자료 #{i+1} (출처: {chunk.domain} 데이터 분석) ---\n{content[:2000]}")
+            # 벡터 검색 결과는 기존처럼 요약합니다.
+            else:
+                reference_list.append(f"--- 참고자료 #{i+1} (출처: {chunk.domain}) ---\n{content[:300]}...")
+        
+        references = "\n\n".join(reference_list)
+
         context = self.conversation_manager.get_context_for_llm(conv_id)
         if context.strip():
             references += f"\n\n[이전 대화]\n{context}"
@@ -210,20 +224,23 @@ class CentralOrchestrator:
 
 사용자 질문: {query}
 
-참고 자료:
-{references}
+아래는 질문에 답변하기 위해 찾은 참고 자료입니다. 이 자료의 내용을 '최대한 활용'하여 질문에 답변해주세요.
+- 제시된 표(테이블)나 목록이 있다면, 그 내용을 빠짐없이 요약하거나 그대로 보여주세요.
+- 자료에 없는 내용은 절대 언급하지 마세요.
+- 정중하고 친근한 말투를 사용하세요.
 
-위 자료를 바탕으로 정확하고 친근한 답변을 작성해주세요.
-- 정중하고 친근한 말투 사용
-- 중요 정보는 구조화하여 제시
-- 관련 부서 연락처 포함 (가능한 경우)
+=== 참고 자료 ===
+{references}
+=================
+
+위 자료를 바탕으로 답변을 작성해주세요.
 
 답변:"""
         prompt = final_prompt_template.format(query=query, references=references)
         
         try:
             response = self.client.chat.completions.create(
-                model=self.final_model, messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=800
+                model=self.final_model, messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=1500
             )
             max_confidence = max([c.confidence for c in chunks]) if chunks else 0.5
             return HandlerResponse(
