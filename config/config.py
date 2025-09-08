@@ -108,13 +108,18 @@ class AppConfig:
     # 대화 관리 설정 (변경 없음)
     # =============================================================================
     
+    # [수정] Langchain Memory의 'k'값으로 사용됩니다. 챗봇이 한 번에 기억할 최근 대화 턴(질문+답변)의 수를 의미합니다.
     CONVERSATION_WINDOW_SIZE: int = 5
-    CONVERSATION_SUMMARY_MAX_LENGTH: int = 200
-    CONVERSATION_SUMMARY_TIMEOUT: float = 10.0
+    # CONVERSATION_SUMMARY_MAX_LENGTH: int = 200
+    # CONVERSATION_SUMMARY_TIMEOUT: float = 10.0
+    
+    # 지시어 해소 기능에 사용되는 OpenAI 호출 타임아웃 (초)
     REFERENCE_RESOLUTION_TIMEOUT: float = 3.0
+    
+    # 지시어 해소 시 생성할 최대 토큰 수
     REFERENCE_RESOLUTION_MAX_TOKENS: int = 100
-    USE_BACKGROUND_SUMMARY: bool = True
-    BACKGROUND_SUMMARY_TIMEOUT: float = 10.0
+    # USE_BACKGROUND_SUMMARY: bool = True
+    # BACKGROUND_SUMMARY_TIMEOUT: float = 10.0
     
     # =============================================================================
     # 피드백 시스템 설정 (변경 없음)
@@ -333,7 +338,7 @@ def get_openai_config() -> dict:
 
 def get_conversation_config() -> dict:
     config = get_config()
-    return {"window_size": config.CONVERSATION_WINDOW_SIZE, "summary_max_length": config.CONVERSATION_SUMMARY_MAX_LENGTH, "summary_timeout": config.CONVERSATION_SUMMARY_TIMEOUT, "reference_resolution_timeout": config.REFERENCE_RESOLUTION_TIMEOUT, "reference_resolution_max_tokens": config.REFERENCE_RESOLUTION_MAX_TOKENS, "use_background_summary": config.USE_BACKGROUND_SUMMARY, "background_summary_timeout": config.BACKGROUND_SUMMARY_TIMEOUT}
+    return {"window_size": config.CONVERSATION_WINDOW_SIZE, "reference_resolution_timeout": config.REFERENCE_RESOLUTION_TIMEOUT, "reference_resolution_max_tokens": config.REFERENCE_RESOLUTION_MAX_TOKENS}
 
 def get_feedback_config() -> dict:
     config = get_config()
