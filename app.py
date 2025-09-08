@@ -985,6 +985,15 @@ def add_to_chat_history(user_input: str, result: Dict):
 # 메인 함수의 JavaScript 주입 부분도 제거
 def main():
     """메인 애플리케이션 로직"""
+    # --- ▼▼▼ 디버깅 코드 추가 ▼▼▼ ---
+    st.error("--- [디버그] 파일 경로 확인 ---")
+    config = get_config()
+    st.write(f"현재 작업 디렉토리(cwd): `{os.getcwd()}`")
+    st.write(f"설정된 벡터스토어 기본 경로: `{config.VECTORSTORE_DIR}`")
+    st.write(f"General 도메인 예상 전체 경로: `{config.get_vectorstore_path('general')}`")
+    st.write(f"Notice 도메인 예상 전체 경로: `{config.get_vectorstore_path('notice')}`")
+    st.error("------------------------------")
+    # --- ▲▲▲ 디버깅 코드 추가 끝 ▲▲▲ ---
     
     # CSS 로드
     load_custom_css()
