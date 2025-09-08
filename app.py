@@ -511,18 +511,25 @@ def render_sidebar():
         else:
             st.markdown('<span class="status-badge status-error">❌ API 키 없음</span>', unsafe_allow_html=True)
         
-        # 인덱스 상태
+        # 🔥 [핵심 수정] 업그레이드된 index_health_check()를 사용하여 인덱스 상태를 정확하게 표시
         try:
             health = index_health_check()
-            loaded = health.get('loaded_domains', 0)
-            total = health.get('total_domains', 4)
+            is_healthy = health.get('is_healthy', False)
+            loaded = health.get('loaded_count', 0)
+            total = health.get('total_count', 0)
             
-            if loaded >= 3:
-                st.markdown(f'<span class="status-badge status-success">✅ 인덱스 {loaded}/{total}</span>', unsafe_allow_html=True)
+            if is_healthy:
+                st.markdown(f'<span class="status-badge status-success">✅ 인덱스 정상 ({loaded}/{total})</span>', unsafe_allow_html=True)
             else:
-                st.markdown(f'<span class="status-badge status-warning">⚠️ 인덱스 {loaded}/{total}</span>', unsafe_allow_html=True)
-        except:
-            st.markdown('<span class="status-badge status-error">❌ 인덱스 오류</span>', unsafe_allow_html=True)
+                st.markdown(f'<span class="status-badge status-error">❌ 인덱스 오류 ({loaded}/{total})</span>', unsafe_allow_html=True)
+                 # 실패한 도메인이 있다면, 디버깅을 위해 사이드바에 표시
+                failed_domains = health.get('failed_domains', [])
+                if failed_domains:
+                    st.error(f"로드 실패: {', '.join(failed_domains)}")
+                    
+        except Exception as e:
+            st.markdown('<span class="status-badge status-error">❌ 인덱스 확인 불가</span>', unsafe_allow_html=True)
+            logger.error(f"인덱스 상태 확인 중 오류: {e}")
         
         st.markdown("---")
         
