@@ -6,6 +6,7 @@ Config-Driven 기반 8개 핸들러 통합 처리 시스템
 
 import logging
 import uuid
+import re # 🔥 [신규/확인] 정규 표현식 라이브러리 import
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -106,9 +107,22 @@ class CentralOrchestrator:
             return "HANDLERS: general"
 
     def _parse_handlers(self, routing_result: str) -> List[str]:
-        if "HANDLERS:" not in routing_result: return [] # 핸들러가 없으면 빈 리스트 반환
-        handler_part = routing_result.split("HANDLERS:")[1].strip()
+        """
+        [리팩토링] 라우팅 결과에서 핸들러 목록 추출 (정규 표현식으로 안정성 강화)
+        "답변: 'HANDLERS: general'" 과 같은 다양한 응답 형식도 처리 가능합니다.
+        """
+        # 🔥 [핵심 수정] 'HANDLERS:' 키워드 이후의 모든 단어를 추출하는 정규 표현식
+        # re.IGNORECASE는 HANDLERS, handlers 등 대소문자를 구분하지 않게 합니다.
+        match = re.search(r'HANDLERS:\s*(.*)', routing_result, re.IGNORECASE)
+        
+        if not match:
+            # 'HANDLERS:' 키워드를 찾지 못한 경우
+            return []
+
+        handler_part = match.group(1).replace('"', '').replace("'", "") # 따옴표 제거
         handlers = [h.strip() for h in handler_part.split(",")]
+        
+        # 유효한 핸들러 이름만 필터링
         valid_handlers = [h for h in handlers if h in self.available_handlers]
         return valid_handlers
 
