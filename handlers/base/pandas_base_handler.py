@@ -45,7 +45,7 @@ class BasePandasAgentHandler:
         config = get_config()
         
         # --- 핸들러 공통 설정 ---
-        common_settings = config.HANDLER_SETTINGS['pandas_agent']
+        common_settings = get_config().HANDLER_SETTINGS['pandas_agent']
         self.llm_model = common_settings['llm_model']
         self.llm_temperature = common_settings['llm_temperature']
         self.cache_ttl_seconds = common_settings['cache_ttl_seconds']
