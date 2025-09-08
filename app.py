@@ -22,7 +22,8 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-import base64 from pathlib import Path
+import base64
+from pathlib import Path
 import streamlit as st
 
 def image_to_base64(image_path: str) -> str:
