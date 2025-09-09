@@ -36,7 +36,7 @@ class CentralOrchestrator:
         self.final_model = self.config.OPENAI_MODEL
         self.max_workers = 8
         self.handler_timeout = 30
-        self.chunks_per_handler = 7
+        self.chunks_per_handler = 8
 
         self.client = None
         if OPENAI_AVAILABLE and self.config.OPENAI_API_KEY:
@@ -344,7 +344,7 @@ class CentralOrchestrator:
         
         try:
             response = self.client.chat.completions.create(
-                model=self.final_model, messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=1500
+                model=self.final_model, messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=1800
             )
             max_confidence = max([c.confidence for c in chunks]) if chunks else 0.5
             return HandlerResponse(
