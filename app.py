@@ -198,33 +198,34 @@ def load_custom_css():
     /* --- ▼▼▼ [통합 및 수정] 반응형 디자인 ▼▼▼ --- */
     /* 모든 모바일 관련 CSS 규칙을 이 하나의 @media 블록 안에 넣습니다. */
     @media (max-width: 768px) {
-        /* 헤더: 모바일에서는 세로 배치로 변경 */
+        /* 헤더: 모바일에서는 세로 배치 유지 */
         .header-card {
-            flex-direction: column; /* 가로 배치를 세로 배치로 변경 */
-            gap: 12px;              /* 이미지와 텍스트 사이 간격 줄임 */
+            flex-direction: column;
+            gap: 12px;
             padding: 1.5rem 1rem;
         }
 
-        /* 헤더 이미지: 모바일에서 크기 살짝 줄임 */
+        /* 헤더 이미지: 크기 유지 */
         .header-byeoli-avatar {
-            width: 70px;
-            height: 70px;
+            width: 80px;
+            height: 80px;
         }
 
-        /* 헤더 텍스트들: 가운데 정렬 */
+        /* 1. 타이틀과 서브타이틀 모두 완벽한 가운데 정렬 */
         .header-title, .header-subtitle {
             text-align: center;
         }
 
-        /* 헤더 타이틀 폰트 크기 조정 (기존 2rem 규칙을 덮어씀) */
+        /* 타이틀: 폰트 크기 및 줄바꿈 방지 유지 */
         .header-title {
             font-size: 1.6rem;
             white-space: nowrap;
         }
-
-        /* 3. 헤더 서브타이틀: 폰트 크기 조정하여 가독성 확보 */
+        
+        /* 2. 서브타이틀: 두 줄로 표현될 때 보기 좋게 라인 간격 조정 */
         .header-subtitle {
-            font-size: 0.9rem; /* 타이틀과의 균형을 위해 크기 조정 */
+            font-size: 0.9rem;
+            line-height: 1.5; /* 줄 간격을 적절하게 조정 */
         }
 
         /* 메시지 말풍선 너비 조정 */
@@ -389,7 +390,12 @@ def render_header():
         <img src="{header_image_src}" class="header-byeoli-avatar">
         <div>
             <h1 class="header-title">🌟벼리톡@경상남도인재개발원</h1>
-            <p class="header-subtitle">경상남도인재개발원 AI 어시스턴트 🌟벼리입니다! - 궁금한 것이 있으시면 언제든 물어보세요!</p>
+            <p class="header-subtitle">
+                경상남도인재개발원 AI 어시스턴트 ✨벼리입니다!
+                <br> {/* <- 이 줄바꿈 태그를 추가합니다. */}
+                - 궁금한 것이 있으시면 언제든 물어보세요!
+            </p>
+
         </div>
     </div>
     """, unsafe_allow_html=True)
