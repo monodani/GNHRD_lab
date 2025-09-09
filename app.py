@@ -381,22 +381,25 @@ def initialize_system():
 # =============================================================================
 
 def render_header():
-    """헤더 렌더링"""
-    # 헤더 이미지도 Base64로 변환된 것을 사용
+    """헤더 렌더링 - 최종 수정본"""
     header_image_src = BYEOLI_IMAGES["default"]
 
+    # st.markdown 안에 있는 HTML 구조의 짝이 정확히 맞는지 확인합니다.
     st.markdown(f"""
     <div class="header-card">
         <img src="{header_image_src}" class="header-byeoli-avatar">
+        
+        {/* ▼▼▼ 이 div가 h1과 p 태그를 올바르게 감싸고 있습니다. ▼▼▼ */}
         <div>
-            <h1 class="header-title">🌟벼리톡@경상남도인재개발원</h1>
+            <h1 class="header-title">🌟 벼리톡@경상남도인재개발원</h1>
             <p class="header-subtitle">
                 경상남도인재개발원 AI 어시스턴트 ✨벼리입니다!
                 <br>
                 - 궁금한 것이 있으시면 언제든 물어보세요!
             </p>
+        </div> 
+        {/* ▲▲▲ 이 div는 바로 위에서 열린 div를 닫습니다. ▲▲▲ */}
 
-        </div>
     </div>
     """, unsafe_allow_html=True)
 
