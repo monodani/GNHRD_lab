@@ -222,7 +222,7 @@ class CentralOrchestrator:
                 logger.warning(f"{futures[future]} 핸들러 실행 오류: {e}")
         
         all_chunks.sort(key=lambda x: x.confidence, reverse=True)
-        return all_chunks[:15]
+        return all_chunks[:20]
 
     def _handle_casual(self, query: str) -> HandlerResponse:
         answer = "안녕하세요! 벼리입니다. 저는 경상남도인재개발원의 AI 어시스턴트입니다. 무엇을 도와드릴까요?"
@@ -278,7 +278,7 @@ class CentralOrchestrator:
         # [수정 시작 1]
         # 1. '참고 자료' 생성
         reference_list = []
-        for i, chunk in enumerate(chunks[:10]):
+        for i, chunk in enumerate(chunks[:15]):
             source = chunk.chunk.metadata.get("source", "")
             content = chunk.chunk.content
 
