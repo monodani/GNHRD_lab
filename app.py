@@ -400,12 +400,12 @@ def render_header():
     <div class="header-card">
         <img src="{header_image_src}" class="header-byeoli-avatar">
         <div>
-            {/* --- ▼▼▼ 이 h1 태그 부분을 수정합니다 ▼▼▼ --- */}
+
             <h1 class="header-title">
                 <span class="header-star">★</span>
                 <span class="header-text">벼리톡@경상남도인재개발원</span>
             </h1>
-            {/* --- ▲▲▲ 수정 끝 ▲▲▲ --- */}
+
             <p class="header-subtitle">
                 경상남도인재개발원 AI 어시스턴트 ✨벼리입니다!
                 <br>
