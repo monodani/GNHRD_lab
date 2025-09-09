@@ -392,7 +392,7 @@ def render_header():
             <h1 class="header-title">🌟벼리톡@경상남도인재개발원</h1>
             <p class="header-subtitle">
                 경상남도인재개발원 AI 어시스턴트 ✨벼리입니다!
-                <br> {/* <- 이 줄바꿈 태그를 추가합니다. */}
+                <br>
                 - 궁금한 것이 있으시면 언제든 물어보세요!
             </p>
 
