@@ -206,8 +206,8 @@ def load_custom_css():
         }
 
         .header-byeoli-avatar {
-            width: 85px;
-            height: 85px;
+            width: 100px;
+            height: 100px;
         }
 
         /* 1. 타이틀 h1 태그 자체를 가운데 정렬 */
@@ -217,7 +217,7 @@ def load_custom_css():
             background: none;
             -webkit-background-clip: unset;
             -webkit-text-fill-color: unset;
-            font-size: 1.4rem;
+            font-size: 1.5rem;
             white-space: nowrap;
         }
 
