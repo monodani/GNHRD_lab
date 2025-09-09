@@ -496,7 +496,7 @@ def render_chat_history():
                <img src="{welcome_image}" class="byeoli-avatar" onerror="this.style.display='none'">
                <strong>벼리</strong><br>
                안녕하세요! 경상남도인재개발원 AI 어시스턴트 벼리입니다! 🌟<br>
-               교육과정, 만족도 조사, 구내식당 메뉴, 공지사항 등 궁금한 것이 있으시면 언제든 물어보세요!
+               경남인재개발원 교육일정, 교육만족도 현황, 시설현황, 구내식당 메뉴, 공지사항 등 궁금한 것이 있으시면 언제든 물어보세요!
            </div>
        </div>
        """, unsafe_allow_html=True)
