@@ -206,8 +206,8 @@ def load_custom_css():
         }
 
         .header-byeoli-avatar {
-            width: 100px;
-            height: 100px;
+            width: 120px;
+            height: 120px;
         }
 
         /* 1. 타이틀 h1 태그 자체를 가운데 정렬 */
