@@ -173,7 +173,7 @@ class AppConfig:
         "notice": {
             "type": "faiss", 
             "class": "NoticeHandler",
-            "description": "공지사항, 경남인재개발원 위치 및 시설 현황정보 및 전반 소개, 벼리 소개, 금주 교육일정 및 교육과정 안내"
+            "description": "공지사항, 경남인재개발원 위치 및 시설 현황정보 및 전반 소개, 역대 원장 현황정보, 원장님 인사말, 벼리 소개, 금주 교육일정 및 교육과정 안내"
         },
         "menu": {
             "type": "faiss", 
