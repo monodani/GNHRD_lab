@@ -342,6 +342,12 @@ def initialize_session_state():
     if 'pending_improvement_feedback' not in st.session_state:
         st.session_state.pending_improvement_feedback = {}  # {message_id: input_text}
 
+    # [추가] 자동 스크롤을 위한 플래그
+    if 'scroll_to_bottom' not in st.session_state:
+        st.session_state.scroll_to_bottom = False
+
+
+
 def reset_session():
     """세션 초기화 (새 대화 시작)"""
     # 대화 관련 상태만 초기화
@@ -619,6 +625,26 @@ def render_chat_history():
    st.markdown('</div>', unsafe_allow_html=True)
 
 
+
+# [추가] 자동 스크롤을 위한 JavaScript 실행 함수
+def trigger_autoscroll():
+    """채팅 컨테이너를 맨 아래로 스크롤하는 JavaScript 코드를 실행합니다."""
+    # st.components.v1.html을 사용하면 iframe 내에서 안전하게 JS 실행 가능
+    # setTimeout을 줘서 렌더링이 완료된 후 스크롤이 일어나도록 보장
+    js_code = """
+    <script>
+        setTimeout(function() {
+            const chatContainer = parent.document.querySelector('.chat-container');
+            if (chatContainer) {
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        }, 100); // 100ms 딜레이
+    </script>
+    """
+    st.components.v1.html(js_code, height=0)
+    
+
+
 def render_input_section():
     """입력 섹션 렌더링 - label 경고 수정"""
     st.markdown('<div class="input-container">', unsafe_allow_html=True)
@@ -863,6 +889,9 @@ def add_to_chat_history(user_input: str, result: Dict):
             "timestamp": datetime.now()
         })
 
+    # [추가] 채팅 기록이 추가되었으므로, 다음 rerun에서 스크롤하도록 플래그 설정
+    st.session_state.scroll_to_bottom = True
+    
 # =============================================================================
 # 메인 애플리케이션
 # =============================================================================
@@ -904,10 +933,15 @@ def main():
     if IS_PRODUCTION:
         # 운영 모드: 심플한 단일 컬럼
         # --- 수정: 채팅 영역을 하나의 카드로 묶기 ---
-        st.markdown('<div class="chat-area-card">', unsafe_allow_html=True)
-
-        
+        st.markdown('<div class="chat-area-card">', unsafe_allow_html=True)        
         render_chat_history()
+
+        # ▼▼▼ [핵심 수정] 자동 스크롤 로직 추가 ▼▼▼
+        if st.session_state.get('scroll_to_bottom', False):
+            trigger_autoscroll()
+            st.session_state.scroll_to_bottom = False  # 플래그 초기화
+        # ▲▲▲ 자동 스크롤 로직 끝 ▲▲▲
+        
         
         # 사용자 입력 처리
         user_input = render_input_section()
@@ -954,6 +988,12 @@ def main():
         
         with col1:
             render_chat_history()
+
+            # ▼▼▼ [핵심 수정] 자동 스크롤 로직 추가 ▼▼▼
+            if st.session_state.get('scroll_to_bottom', False):
+                trigger_autoscroll()
+                st.session_state.scroll_to_bottom = False  # 플래그 초기화
+            # ▲▲▲ 자동 스크롤 로직 끝 ▲▲▲
             
             # 사용자 입력 처리
             user_input = render_input_section()
