@@ -136,8 +136,8 @@ def load_custom_css():
     }
     
     .header-byeoli-avatar {
-        width: 80px;
-        height: 80px;
+        width: 100px;
+        height: 100px;
     }
     
     .header-title {
@@ -205,27 +205,39 @@ def load_custom_css():
             padding: 1.5rem 1rem;
         }
 
-        /* 헤더 이미지: 크기 유지 */
         .header-byeoli-avatar {
-            width: 80px;
-            height: 80px;
+            width: 70px;
+            height: 70px;
         }
 
-        /* 1. 타이틀과 서브타이틀 모두 완벽한 가운데 정렬 */
-        .header-title, .header-subtitle {
-            text-align: center;
-        }
-
-        /* 타이틀: 폰트 크기 및 줄바꿈 방지 유지 */
+        /* 1. 타이틀 h1 태그 자체를 가운데 정렬 */
         .header-title {
+            text-align: center;
+            /* 기존 그라데이션 색상 제거 */
+            background: none;
+            -webkit-background-clip: unset;
+            -webkit-text-fill-color: unset;
             font-size: 1.6rem;
-            white-space: nowrap;
+        }
+
+        /* 2. 별(★) 기호 스타일: 노란색 적용 */
+        .header-star {
+            color: #FFC700; /* 세련된 노란색 (골드) */
+            vertical-align: middle; /* 텍스트와 세로 중앙 정렬 */
+            margin-right: 2px; /* 텍스트와의 간격 살짝 주기 */
         }
         
-        /* 2. 서브타이틀: 두 줄로 표현될 때 보기 좋게 라인 간격 조정 */
+        /* 3. 타이틀 텍스트 스타일: 전문적인 다크블루 색상 적용 */
+        .header-text {
+            color: #2c3e50; /* 전문적이고 시인성 좋은 다크블루 */
+            vertical-align: middle; /* 별과 세로 중앙 정렬 */
+        }
+
+        /* 서브타이틀: 가운데 정렬 및 줄 간격 유지 */
         .header-subtitle {
+            text-align: center;
             font-size: 0.9rem;
-            line-height: 1.5; /* 줄 간격을 적절하게 조정 */
+            line-height: 1.5;
         }
 
         /* 메시지 말풍선 너비 조정 */
@@ -381,14 +393,19 @@ def initialize_system():
 # =============================================================================
 
 def render_header():
-    """헤더 렌더링 - 주석 제거 최종본"""
+    """헤더 렌더링 - 최종 디자인 적용"""
     header_image_src = BYEOLI_IMAGES["default"]
 
     st.markdown(f"""
     <div class="header-card">
         <img src="{header_image_src}" class="header-byeoli-avatar">
         <div>
-            <h1 class="header-title">🌟 벼리톡@경상남도인재개발원</h1>
+            {/* --- ▼▼▼ 이 h1 태그 부분을 수정합니다 ▼▼▼ --- */}
+            <h1 class="header-title">
+                <span class="header-star">★</span>
+                <span class="header-text">벼리톡@경상남도인재개발원</span>
+            </h1>
+            {/* --- ▲▲▲ 수정 끝 ▲▲▲ --- */}
             <p class="header-subtitle">
                 경상남도인재개발원 AI 어시스턴트 ✨벼리입니다!
                 <br>
