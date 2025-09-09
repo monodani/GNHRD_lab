@@ -201,14 +201,14 @@ def load_custom_css():
         /* 헤더: 모바일에서는 세로 배치로 변경 */
         .header-card {
             flex-direction: column; /* 가로 배치를 세로 배치로 변경 */
-            gap: 10px;              /* 이미지와 텍스트 사이 간격 줄임 */
+            gap: 12px;              /* 이미지와 텍스트 사이 간격 줄임 */
             padding: 1.5rem 1rem;
         }
 
         /* 헤더 이미지: 모바일에서 크기 살짝 줄임 */
         .header-byeoli-avatar {
-            width: 60px;
-            height: 60px;
+            width: 70px;
+            height: 70px;
         }
 
         /* 헤더 텍스트들: 가운데 정렬 */
@@ -218,7 +218,13 @@ def load_custom_css():
 
         /* 헤더 타이틀 폰트 크기 조정 (기존 2rem 규칙을 덮어씀) */
         .header-title {
-            font-size: 1.8rem; 
+            font-size: 1.6rem;
+            white-space: nowrap;
+        }
+
+        /* 3. 헤더 서브타이틀: 폰트 크기 조정하여 가독성 확보 */
+        .header-subtitle {
+            font-size: 0.9rem; /* 타이틀과의 균형을 위해 크기 조정 */
         }
 
         /* 메시지 말풍선 너비 조정 */
