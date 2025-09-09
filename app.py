@@ -206,8 +206,8 @@ def load_custom_css():
         }
 
         .header-byeoli-avatar {
-            width: 70px;
-            height: 70px;
+            width: 85px;
+            height: 85px;
         }
 
         /* 1. 타이틀 h1 태그 자체를 가운데 정렬 */
@@ -218,6 +218,7 @@ def load_custom_css():
             -webkit-background-clip: unset;
             -webkit-text-fill-color: unset;
             font-size: 1.6rem;
+            white-space: nowrap;
         }
 
         /* 2. 별(★) 기호 스타일: 노란색 적용 */
