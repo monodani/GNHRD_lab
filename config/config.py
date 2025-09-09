@@ -100,7 +100,7 @@ class AppConfig:
     # =============================================================================
     
     OPENAI_API_KEY: Optional[str] = field(default_factory=get_openai_api_key)
-    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_MODEL: str = "gpt-4o"
     OPENAI_TIMEOUT: float = 10.0
     OPENAI_MAX_RETRIES: int = 3
     
