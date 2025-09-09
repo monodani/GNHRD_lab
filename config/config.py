@@ -204,7 +204,7 @@ class AppConfig:
         "subject_satisfaction": {"csv_path": "data/satisfaction/subject_satisfaction.csv"},
         "cyber": {"csv_path": "data/cyber/cyber.csv"},
         "schedule": {"csv_path": "data/schedule/schedule.csv"},
-        "notice": {"k": 7} # 공지사항은 더 많이 검색하도록 기본값(3)을 오버라이드
+        "notice": {"k": 8} # 공지사항은 더 많이 검색하도록 기본값(3)을 오버라이드
     })
 
     # 🔥 [신규] FAISS 벡터스토어 실제 경로 매핑
