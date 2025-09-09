@@ -157,7 +157,7 @@ class AppConfig:
         "schedule": {
             "type": "pandas", 
             "class": "ScheduleHandler",
-            "description": "교육 일정, 스케줄, 기간 관련 정보"
+            "description": "교육일정, 스케줄, 기간 관련 정보"
         },
         # FAISS Vectorstore Handlers
         "general": {
@@ -173,7 +173,7 @@ class AppConfig:
         "notice": {
             "type": "faiss", 
             "class": "NoticeHandler",
-            "description": "공지사항, 알림, 최신 소식, 경남인재개발원 소개 및 현황 정보, 벼리 소개, 금주 교육과정 안내"
+            "description": "공지사항, 알림, 최신 소식, 경남인재개발원 소개 및 현황 정보, 벼리 소개, 금주 교육일정 및 교육과정 안내"
         },
         "menu": {
             "type": "faiss", 
