@@ -217,7 +217,7 @@ def load_custom_css():
             background: none;
             -webkit-background-clip: unset;
             -webkit-text-fill-color: unset;
-            font-size: 1.6rem;
+            font-size: 1.4rem;
             white-space: nowrap;
         }
 
