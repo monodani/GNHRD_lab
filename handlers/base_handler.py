@@ -278,7 +278,7 @@ class CentralOrchestrator:
         # [수정 시작 1]
         # 1. '참고 자료' 생성
         reference_list = []
-        for i, chunk in enumerate(chunks[:5]):
+        for i, chunk in enumerate(chunks[:10]):
             source = chunk.chunk.metadata.get("source", "")
             content = chunk.chunk.content
 
