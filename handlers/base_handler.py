@@ -10,6 +10,11 @@ import re # 🔥 [신규/확인] 정규 표현식 라이브러리 import
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# [수정] 날짜/시간 계산을 위한 라이브러리 추가
+from datetime import datetime, timedelta, timezone
+from typing import List, Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from config.config import get_config
 from utils.contracts import QueryRequest, HandlerResponse, ChunkResult
 from utils.conversation_manager import get_conversation_manager
@@ -21,6 +26,8 @@ except ImportError:
     OPENAI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+# [신규] 대한민국 표준시(KST) 정의
+KST = timezone(timedelta(hours=9))
 
 class CentralOrchestrator:
     def __init__(self):
@@ -61,38 +68,100 @@ class CentralOrchestrator:
         logger.info(f"✅ CentralOrchestrator v7.1 초기화 완료 ({len(self.available_handlers)}개 핸들러 동적 로드)")
 
     def handle(self, request: QueryRequest) -> HandlerResponse:
+        # [수정] 전체 handle 메서드 흐름 변경
         query = getattr(request, 'query', '')
         conv_id = getattr(request, 'conversation_id', f"conv_{uuid.uuid4().hex[:8]}")
         
+        # 단계 1: 지시어 해소 ("그것" -> "중견리더 과정")
         resolved_query = self.conversation_manager.resolve_references(
             query, self.conversation_manager.get_recent_context_for_reference(conv_id)
         )
         
-        routing_result = self._route_query(resolved_query)
+        # 단계 2: 시간 표현 전처리 ("오늘" -> "(2025-09-10 또는 2025. 09. 10.)")
+        time_aware_query = self._resolve_time_references(resolved_query)
+        if resolved_query != time_aware_query:
+            logger.info(f"시간 표현 변환: '{resolved_query}' -> '{time_aware_query}'")
+
+        # 단계 3: 라우팅 (전처리가 완료된 최종 쿼리 사용)
+        routing_result = self._route_query(time_aware_query)
         
-        # 🔥 [핵심 수정] 'startswith' 대신 'in'을 사용하여 라우팅 판별 로직의 유연성 확보
+        # 단계 4: 라우팅 결과에 따라 핸들러 실행 또는 답변 생성
         if "CASUAL" in routing_result:
-            response = self._handle_casual(resolved_query)
+            response = self._handle_casual(time_aware_query)
         elif "NO_HANDLER" in routing_result:
-            response = self._handle_no_handler(resolved_query)
+            response = self._handle_no_handler(time_aware_query)
         else:
             handlers_to_run = self._parse_handlers(routing_result)
-            
-            # 핸들러가 선택되지 않은 경우도 NO_HANDLER와 동일하게 처리
             if not handlers_to_run:
-                 response = self._handle_no_handler(resolved_query)
+                 response = self._handle_no_handler(time_aware_query)
             else:
-                all_chunks = self._execute_handlers(resolved_query, handlers_to_run)
+                all_chunks = self._execute_handlers(time_aware_query, handlers_to_run)
                 if not all_chunks:
-                    response = self._handle_no_handler(resolved_query)
+                    response = self._handle_no_handler(time_aware_query)
                 else:
-                    response = self._generate_final_answer(resolved_query, all_chunks, conv_id)
+                    response = self._generate_final_answer(time_aware_query, all_chunks, conv_id)
 
+        # 최종 단계: 대화 기록 저장 (사용자의 원본 질문으로 저장)
         message_id = self.conversation_manager.add_turn(
             conv_id=conv_id, user_message=query, bot_response=response.answer, confidence=response.confidence
         )
         response.message_id = message_id
         return response
+
+    # [신규] 시간 표현 전처리 메서드 추가
+    def _resolve_time_references(self, query: str) -> str:
+        """
+        사용자 쿼리의 상대 시간 표현을 DB의 두 가지 날짜 형식('YYYY-MM-DD', 'YYYY. MM. DD.')을
+        모두 포함하는 절대 날짜 문자열로 변환합니다.
+        """
+        now = datetime.now(KST)
+        today = now.date()
+
+        def format_date_for_search(date_obj: datetime.date) -> str:
+            format1 = date_obj.strftime('%Y-%m-%d')
+            format2 = date_obj.strftime('%Y. %m. %d.')
+            return f"({format1} 또는 {format2})"
+
+        def format_range(start_date: datetime.date, end_date: datetime.date) -> str:
+            return f"{start_date.strftime('%Y-%m-%d')}부터 {end_date.strftime('%Y-%m-%d')}까지"
+
+        def day_replacer(match):
+            try:
+                num = int(match.group(1))
+                direction = match.group(2)
+                if direction == '후': target_date = today + timedelta(days=num)
+                else: target_date = today - timedelta(days=num)
+                return format_date_for_search(target_date)
+            except ValueError: return match.group(0)
+            
+        query = re.sub(r'(\d+)\s*일\s*(후|전)', day_replacer, query)
+
+        keywords = {
+            "다음 주": lambda: format_range(today + timedelta(days=7-today.weekday()), today + timedelta(days=13-today.weekday())),
+            "이번 주": lambda: format_range(today - timedelta(days=today.weekday()), today + timedelta(days=6-today.weekday())),
+            "저번 주": lambda: format_range(today - timedelta(days=today.weekday()+7), today - timedelta(days=today.weekday()+1)),
+            "내일": lambda: format_date_for_search(today + timedelta(days=1)),
+            "어제": lambda: format_date_for_search(today - timedelta(days=1)),
+            "오늘": lambda: format_date_for_search(today),
+        }
+        
+        for keyword, calculator in keywords.items():
+            pattern = re.compile(r'\b' + re.escape(keyword) + r'\b')
+            if pattern.search(query):
+                query = pattern.sub(calculator(), query)
+
+        if "지금" in query or "현재" in query:
+            replacement_string = f"{format_date_for_search(today)} {now.strftime('%H시 %M분')}"
+            if "식당" in query or "메뉴" in query:
+                hour = now.hour
+                time_context = "현재"
+                if 11 <= hour < 14: time_context = "점심"
+                elif 17 <= hour < 19: time_context = "저녁"
+                elif hour < 10: time_context = "아침"
+                replacement_string = f"{format_date_for_search(today)} {time_context}"
+            query = query.replace("지금", replacement_string).replace("현재", replacement_string)
+            
+        return query
 
     def _route_query(self, query: str) -> str:
         if not self.client: return "HANDLERS: general"
