@@ -344,7 +344,7 @@ class CentralOrchestrator:
         
         try:
             response = self.client.chat.completions.create(
-                model=self.final_model, messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=1800
+                model=self.final_model, messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=2000
             )
             max_confidence = max([c.confidence for c in chunks]) if chunks else 0.5
             return HandlerResponse(
