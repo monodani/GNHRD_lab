@@ -230,7 +230,7 @@ class CentralOrchestrator:
             try:
                 response = self.client.chat.completions.create(
                     model=self.final_model,
-                    messages=[{"role": "user", "content": f"친근한 AI 어시스턴트로서 다음 말에 답변해주세요: {query}"}],
+                    messages=[{"role": "user", "content": f"친근한 AI 어시스턴트로서 다음 말에 존대말로 답변해주세요: {query}"}],
                     temperature=0.7, max_tokens=300
                 )
                 answer = response.choices[0].message.content.strip()
