@@ -393,19 +393,17 @@ def initialize_system():
 # =============================================================================
 
 def render_header():
-    """헤더 렌더링 - 최종 디자인 적용"""
+    """헤더 렌더링 - 최종 디자인 적용 (주석 완전 제거)"""
     header_image_src = BYEOLI_IMAGES["default"]
 
     st.markdown(f"""
     <div class="header-card">
         <img src="{header_image_src}" class="header-byeoli-avatar">
         <div>
-
             <h1 class="header-title">
                 <span class="header-star">★</span>
                 <span class="header-text">벼리톡@경상남도인재개발원</span>
             </h1>
-
             <p class="header-subtitle">
                 경상남도인재개발원 AI 어시스턴트 ✨벼리입니다!
                 <br>
