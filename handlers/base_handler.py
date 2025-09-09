@@ -36,7 +36,7 @@ class CentralOrchestrator:
         self.final_model = self.config.OPENAI_MODEL
         self.max_workers = 8
         self.handler_timeout = 30
-        self.chunks_per_handler = 5
+        self.chunks_per_handler = 7
 
         self.client = None
         if OPENAI_AVAILABLE and self.config.OPENAI_API_KEY:
@@ -222,7 +222,7 @@ class CentralOrchestrator:
                 logger.warning(f"{futures[future]} 핸들러 실행 오류: {e}")
         
         all_chunks.sort(key=lambda x: x.confidence, reverse=True)
-        return all_chunks[:10]
+        return all_chunks[:15]
 
     def _handle_casual(self, query: str) -> HandlerResponse:
         answer = "안녕하세요! 벼리입니다. 저는 경상남도인재개발원의 AI 어시스턴트입니다. 무엇을 도와드릴까요?"
