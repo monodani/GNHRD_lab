@@ -864,95 +864,57 @@ def update_performance_stats(elapsed_time: float, success: bool):
         stats["success_rate"] = min(stats["success_rate"] + 0.5, 100)
     else:
         stats["success_rate"] = max(stats["success_rate"] - 2, 0)
+        
+
+def add_to_chat_history(role: str, content: dict):
+    """지정된 역할의 메시지를 채팅 기록에 추가합니다."""
+    # 최대 기록 수 체크
+    if len(st.session_state.chat_history) >= MAX_CHAT_HISTORY * 2:
+        st.session_state.chat_history = st.session_state.chat_history[-MAX_CHAT_HISTORY:]
+    
+    # 공통 정보 추가
+    message = {
+        "role": role,
+        "timestamp": datetime.now(),
+        **content # content 딕셔너리의 모든 키-값 쌍을 추가
+    }
+    st.session_state.chat_history.append(message)
+    
+    # 메시지가 추가되었으므로 스크롤 플래그 설정
+    st.session_state.scroll_to_bottom = True
+
 
     
 # =============================================================================
-# 메인 애플리케이션 (수정된 버전)
+# 메인 애플리케이션 (간단하게 수정된 버전)
 # =============================================================================
 def main():
-    """메인 애플리케이션 로직 (사용자 입력 시 즉시 스크롤되도록 수정)"""
+    """메인 애플리케이션 로직"""
     
-    # CSS 로드
+    # --- 상단부 (수정 없음) ---
     load_custom_css()
-    
-    # 세션 상태 초기화
-    # (주의: initialize_session_state 함수에 'processing_user_input': None 추가 필요)
     initialize_session_state()
-    
-    # 시스템 초기화 (첫 실행시에만)
     if not st.session_state.system_initialized:
         with st.spinner("시스템 초기화 중..."):
             init_result = initialize_system()
-            
             if not init_result["success"]:
-                if IS_PRODUCTION:
-                    st.error("시스템 초기화에 실패했습니다. 관리자에게 문의해주세요.")
-                else:
-                    st.error(f"시스템 초기화 실패: {init_result.get('error')}")
-                    st.code(init_result.get('error', ''))
+                st.error(f"시스템 초기화 실패: {init_result.get('error', 'Unknown error')}")
                 st.stop()
-            
             st.session_state.system_initialized = True
-            if not IS_PRODUCTION:
-                st.success("✅ 시스템 초기화 완료!")
-
-    # ▼▼▼ [핵심 수정 1] 쿼리 처리 로직을 UI 렌더링 이전에 배치 ▼▼▼
-    # 이전 rerun에서 사용자가 입력하여 처리 대기 중인 쿼리가 있는지 확인합니다.
-    if query_to_process := st.session_state.get('processing_user_input'):
-        # 처리 시작 전, 플래그를 먼저 소모하여 중복 실행을 방지합니다.
-        st.session_state.processing_user_input = None
-
-        # 쿼리 처리 실행
-        result = process_user_query(query_to_process)
-        
-        # 성공 시, 스트리밍으로 응답을 먼저 보여줍니다.
-        if result["success"]:
-            response = result["response"]
-            render_streaming_response(response.answer, result["message_id"])
-
-        # 스트리밍 완료 후, 완성된 메시지를 채팅 기록에 추가합니다.
-        # (add_to_chat_history 함수의 로직을 여기에 통합)
-        if result["success"]:
-            response = result["response"]
-            st.session_state.chat_history.append({
-                "role": "assistant",
-                "content": response.answer,
-                "message_id": result.get("message_id", str(uuid.uuid4())),
-                "confidence": response.confidence,
-                "domain": response.domain,
-                "elapsed_ms": int(result["elapsed_time"] * 1000),
-                "timestamp": datetime.now()
-            })
-        else: # 실패 시 에러 메시지 추가
-            st.session_state.chat_history.append({
-                "role": "assistant",
-                "content": "죄송합니다. 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
-                "message_id": str(uuid.uuid4()),
-                "confidence": 0.0,
-                "domain": "error",
-                "elapsed_ms": int(result["elapsed_time"] * 1000),
-                "timestamp": datetime.now()
-            })
-        
-        # 봇 응답이 기록에 추가되었으므로, 페이지를 새로고침하여
-        # 피드백 버튼 등을 포함한 최종 상태를 렌더링합니다.
-        st.rerun()
-
-    # --- UI 렌더링 시작 ---
+    
     st.markdown('<div class="main-container">', unsafe_allow_html=True)                
     render_header()
     
-    # --- 메인 레이아웃 ---
+    # --- 메인 레이아웃 (운영/개발 분기) ---
     if IS_PRODUCTION:
         # [운영 모드]
         st.markdown('<div class="chat-area-card">', unsafe_allow_html=True)
-        
         render_chat_history()
 
-        # ▼▼▼ [핵심 수정 2] "생각 중..." 애니메이션 로직 변경 ▼▼▼
-        # 봇이 응답을 생성하는 중일 때 애니메이션을 표시합니다.
+        # "생각 중..." 애니메이션 표시
         if st.session_state.get('processing_user_input'):
-            st.markdown(f"""
+            typing_placeholder = st.empty()
+            typing_placeholder.markdown(f"""
             <div class="message-card">
                 <div class="assistant-message">
                     <img src="{BYEOLI_IMAGES['typing']}" class="byeoli-avatar">
@@ -961,75 +923,68 @@ def main():
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            # 애니메이션이 표시될 때도 스크롤이 필요할 수 있으므로 플래그를 켭니다.
-            st.session_state.scroll_to_bottom = True
-
-        # 자동 스크롤 로직
+            st.session_state.scroll_to_bottom = True # 생각 중일 때도 스크롤
+        
+        # 자동 스크롤 실행
         if st.session_state.get('scroll_to_bottom', False):
             trigger_autoscroll()
             st.session_state.scroll_to_bottom = False
-        
+
         user_input = render_input_section()
-        
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # ▼▼▼ [핵심 수정 3] 사용자 입력 처리 로직 변경 ▼▼▼
-        if user_input:
-            # 1. 사용자 메시지만 먼저 채팅 기록에 추가
-            st.session_state.chat_history.append({
-                "role": "user",
-                "content": user_input,
-                "timestamp": datetime.now()
-            })
-            # 2. 다음번 rerun에서 처리하도록 입력값을 상태에 저장
-            st.session_state.processing_user_input = user_input
-            # 3. 사용자 메시지로 즉시 스크롤하도록 플래그 설정
-            st.session_state.scroll_to_bottom = True
-            
-            # 4. 화면을 즉시 새로고침하여 사용자 메시지를 표시하고 스크롤을 실행
-            st.rerun()
-    
     else:
         # [개발 모드]
         render_sidebar()
-        col1, col2 = st.columns([4, 1])
+        render_chat_history()
+        if st.session_state.get('scroll_to_bottom', False):
+            trigger_autoscroll()
+            st.session_state.scroll_to_bottom = False
+        user_input = render_input_section()
+
+    # ▼▼▼ [핵심 수정] 사용자 입력과 봇 응답 처리를 if/elif로 분리 ▼▼▼
+
+    # 1단계: 새로운 사용자 입력 접수
+    if user_input:
+        # 사용자 메시지만 먼저 기록에 추가
+        add_to_chat_history(role="user", content={"content": user_input})
+        # 다음 실행에서 처리하도록 입력값 저장
+        st.session_state.processing_user_input = user_input
+        # 화면을 즉시 새로고침하여 사용자 메시지 표시 및 스크롤 실행
+        st.rerun()
+
+    # 2단계: 접수된 입력 처리 (봇 응답 생성)
+    elif query_to_process := st.session_state.get('processing_user_input'):
+        # 처리 플래그를 먼저 비워서 중복 실행 방지
+        st.session_state.processing_user_input = None
         
-        with col1:
-            render_chat_history()
+        # 쿼리 처리
+        result = process_user_query(query_to_process)
+        
+        # 봇 응답을 기록에 추가
+        if result["success"]:
+            response = result["response"]
+            bot_content = {
+                "content": response.answer, "message_id": result.get("message_id"),
+                "confidence": response.confidence, "domain": response.domain,
+                "elapsed_ms": int(result["elapsed_time"] * 1000)
+            }
+            add_to_chat_history(role="assistant", content=bot_content)
+        else:
+            error_content = {
+                "content": "죄송합니다. 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+                "message_id": str(uuid.uuid4()), "confidence": 0.0, "domain": "error",
+                "elapsed_ms": int(result["elapsed_time"] * 1000)
+            }
+            add_to_chat_history(role="assistant", content=error_content)
 
-            # "생각 중..." 표시 (개발 모드는 간단하게 텍스트로)
-            if st.session_state.get('processing_user_input'):
-                with st.chat_message("assistant"):
-                     st.write("생각 중...")
-                st.session_state.scroll_to_bottom = True
+        # "생각 중..." 애니메이션 제거 및 최종 화면 그리기를 위해 rerun
+        # (스트리밍 효과는 rerun 전에 마지막으로 보여줘야 하므로 여기에 위치)
+        if result["success"]:
+            render_streaming_response(result["response"].answer, result["message_id"])
 
-            # 자동 스크롤 로직
-            if st.session_state.get('scroll_to_bottom', False):
-                trigger_autoscroll()
-                st.session_state.scroll_to_bottom = False
-            
-            user_input = render_input_section()
-            
-            if user_input:
-                st.session_state.chat_history.append({
-                    "role": "user",
-                    "content": user_input,
-                    "timestamp": datetime.now()
-                })
-                st.session_state.processing_user_input = user_input
-                st.session_state.scroll_to_bottom = True
-                st.rerun()
+        st.rerun()
 
-        with col2:
-            # 개발 모드 추가 정보 (기존과 동일)
-            st.markdown("### 🛠️ 개발 도구")
-            if st.button("💾 채팅 기록 저장", use_container_width=True):
-                # ... (기존 코드와 동일)
-                pass # 실제 코드에서는 구현 유지
-            if st.button("🗑️ 채팅 기록 삭제", use_container_width=True):
-                # ... (기존 코드와 동일)
-                pass # 실제 코드에서는 구현 유지
-                
     st.markdown('</div>', unsafe_allow_html=True)
     
 # =============================================================================
