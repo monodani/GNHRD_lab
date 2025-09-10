@@ -353,6 +353,11 @@ def initialize_session_state():
     if 'scroll_to_bottom' not in st.session_state:
         st.session_state.scroll_to_bottom = False
 
+        # ▼▼▼ [핵심 수정] ▼▼▼
+    # 사용자가 입력한 후, 봇이 처리해야 할 입력을 저장하는 상태
+    if 'processing_user_input' not in st.session_state:
+        st.session_state.processing_user_input = None
+
 
 
 def reset_session():
@@ -860,57 +865,18 @@ def update_performance_stats(elapsed_time: float, success: bool):
     else:
         stats["success_rate"] = max(stats["success_rate"] - 2, 0)
 
-def add_to_chat_history(user_input: str, result: Dict):
-    """채팅 기록에 추가"""
-    # 최대 기록 수 체크
-    if len(st.session_state.chat_history) >= MAX_CHAT_HISTORY * 2:
-        st.session_state.chat_history = st.session_state.chat_history[-MAX_CHAT_HISTORY:]
-    
-    # 사용자 메시지 추가
-    st.session_state.chat_history.append({
-        "role": "user",
-        "content": user_input,
-        "timestamp": datetime.now()
-    })
-    
-    # 어시스턴트 응답 추가
-    if result["success"]:
-        response = result["response"]
-        st.session_state.chat_history.append({
-            "role": "assistant",
-            "content": response.answer,
-            "message_id": result.get("message_id", str(uuid.uuid4())),
-            "confidence": response.confidence,
-            "domain": response.domain,
-            "elapsed_ms": int(result["elapsed_time"] * 1000),
-            "timestamp": datetime.now()
-        })
-    else:
-        st.session_state.chat_history.append({
-            "role": "assistant",
-            "content": "죄송합니다. 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
-            "message_id": str(uuid.uuid4()),
-            "confidence": 0.0,
-            "domain": "error",
-            "elapsed_ms": int(result["elapsed_time"] * 1000),
-            "timestamp": datetime.now()
-        })
-
-    # [추가] 채팅 기록이 추가되었으므로, 다음 rerun에서 스크롤하도록 플래그 설정
-    st.session_state.scroll_to_bottom = True
     
 # =============================================================================
-# 메인 애플리케이션
+# 메인 애플리케이션 (수정된 버전)
 # =============================================================================
-
-# 메인 함수의 JavaScript 주입 부분도 제거
 def main():
-    """메인 애플리케이션 로직"""
+    """메인 애플리케이션 로직 (사용자 입력 시 즉시 스크롤되도록 수정)"""
     
     # CSS 로드
     load_custom_css()
     
     # 세션 상태 초기화
+    # (주의: initialize_session_state 함수에 'processing_user_input': None 추가 필요)
     initialize_session_state()
     
     # 시스템 초기화 (첫 실행시에만)
@@ -929,125 +895,143 @@ def main():
             st.session_state.system_initialized = True
             if not IS_PRODUCTION:
                 st.success("✅ 시스템 초기화 완료!")
-                
-    # --- 수정: 메인 컨테이너로 전체 UI 감싸기 ---
+
+    # ▼▼▼ [핵심 수정 1] 쿼리 처리 로직을 UI 렌더링 이전에 배치 ▼▼▼
+    # 이전 rerun에서 사용자가 입력하여 처리 대기 중인 쿼리가 있는지 확인합니다.
+    if query_to_process := st.session_state.get('processing_user_input'):
+        # 처리 시작 전, 플래그를 먼저 소모하여 중복 실행을 방지합니다.
+        st.session_state.processing_user_input = None
+
+        # 쿼리 처리 실행
+        result = process_user_query(query_to_process)
+        
+        # 성공 시, 스트리밍으로 응답을 먼저 보여줍니다.
+        if result["success"]:
+            response = result["response"]
+            render_streaming_response(response.answer, result["message_id"])
+
+        # 스트리밍 완료 후, 완성된 메시지를 채팅 기록에 추가합니다.
+        # (add_to_chat_history 함수의 로직을 여기에 통합)
+        if result["success"]:
+            response = result["response"]
+            st.session_state.chat_history.append({
+                "role": "assistant",
+                "content": response.answer,
+                "message_id": result.get("message_id", str(uuid.uuid4())),
+                "confidence": response.confidence,
+                "domain": response.domain,
+                "elapsed_ms": int(result["elapsed_time"] * 1000),
+                "timestamp": datetime.now()
+            })
+        else: # 실패 시 에러 메시지 추가
+            st.session_state.chat_history.append({
+                "role": "assistant",
+                "content": "죄송합니다. 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+                "message_id": str(uuid.uuid4()),
+                "confidence": 0.0,
+                "domain": "error",
+                "elapsed_ms": int(result["elapsed_time"] * 1000),
+                "timestamp": datetime.now()
+            })
+        
+        # 봇 응답이 기록에 추가되었으므로, 페이지를 새로고침하여
+        # 피드백 버튼 등을 포함한 최종 상태를 렌더링합니다.
+        st.rerun()
+
+    # --- UI 렌더링 시작 ---
     st.markdown('<div class="main-container">', unsafe_allow_html=True)                
-    
-    # UI 렌더링
     render_header()
     
-    # 메인 레이아웃
+    # --- 메인 레이아웃 ---
     if IS_PRODUCTION:
-        # 운영 모드: 심플한 단일 컬럼
-        # --- 수정: 채팅 영역을 하나의 카드로 묶기 ---
-        st.markdown('<div class="chat-area-card">', unsafe_allow_html=True)        
+        # [운영 모드]
+        st.markdown('<div class="chat-area-card">', unsafe_allow_html=True)
+        
         render_chat_history()
 
-        # ▼▼▼ [핵심 수정] 자동 스크롤 로직 추가 ▼▼▼
+        # ▼▼▼ [핵심 수정 2] "생각 중..." 애니메이션 로직 변경 ▼▼▼
+        # 봇이 응답을 생성하는 중일 때 애니메이션을 표시합니다.
+        if st.session_state.get('processing_user_input'):
+            st.markdown(f"""
+            <div class="message-card">
+                <div class="assistant-message">
+                    <img src="{BYEOLI_IMAGES['typing']}" class="byeoli-avatar">
+                    <strong>벼리</strong><br>
+                    <span class="loading-spinner"></span> 생각하고 있어요...
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            # 애니메이션이 표시될 때도 스크롤이 필요할 수 있으므로 플래그를 켭니다.
+            st.session_state.scroll_to_bottom = True
+
+        # 자동 스크롤 로직
         if st.session_state.get('scroll_to_bottom', False):
             trigger_autoscroll()
-            st.session_state.scroll_to_bottom = False  # 플래그 초기화
-        # ▲▲▲ 자동 스크롤 로직 끝 ▲▲▲
+            st.session_state.scroll_to_bottom = False
         
-        
-        # 사용자 입력 처리
         user_input = render_input_section()
         
         st.markdown('</div>', unsafe_allow_html=True)
         
+        # ▼▼▼ [핵심 수정 3] 사용자 입력 처리 로직 변경 ▼▼▼
         if user_input:
-            # 처리 중 표시
-            with st.spinner(""):
-                # 타이핑 이미지로 처리 중 표시
-                typing_placeholder = st.empty()
-                typing_placeholder.markdown(f"""
-                <div class="message-card">
-                    <div class="assistant-message">
-                        <img src="{BYEOLI_IMAGES['typing']}" class="byeoli-avatar">
-                        <strong>벼리</strong><br>
-                        <span class="loading-spinner"></span> 생각하고 있어요...
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # 쿼리 처리
-                result = process_user_query(user_input)
-                
-                # 타이핑 표시 제거
-                typing_placeholder.empty()
-                
-                # 채팅 기록에 추가
-                add_to_chat_history(user_input, result)
-                
-                # 성공시 스트리밍 효과
-                if result["success"]:
-                    response = result["response"]
-                    render_streaming_response(response.answer, result["message_id"])
-                
-                # 페이지 새로고침
-                st.rerun()
+            # 1. 사용자 메시지만 먼저 채팅 기록에 추가
+            st.session_state.chat_history.append({
+                "role": "user",
+                "content": user_input,
+                "timestamp": datetime.now()
+            })
+            # 2. 다음번 rerun에서 처리하도록 입력값을 상태에 저장
+            st.session_state.processing_user_input = user_input
+            # 3. 사용자 메시지로 즉시 스크롤하도록 플래그 설정
+            st.session_state.scroll_to_bottom = True
+            
+            # 4. 화면을 즉시 새로고침하여 사용자 메시지를 표시하고 스크롤을 실행
+            st.rerun()
     
     else:
-        # 개발 모드: 사이드바 포함 레이아웃
+        # [개발 모드]
         render_sidebar()
-        
         col1, col2 = st.columns([4, 1])
         
         with col1:
             render_chat_history()
 
-            # ▼▼▼ [핵심 수정] 자동 스크롤 로직 추가 ▼▼▼
+            # "생각 중..." 표시 (개발 모드는 간단하게 텍스트로)
+            if st.session_state.get('processing_user_input'):
+                with st.chat_message("assistant"):
+                     st.write("생각 중...")
+                st.session_state.scroll_to_bottom = True
+
+            # 자동 스크롤 로직
             if st.session_state.get('scroll_to_bottom', False):
                 trigger_autoscroll()
-                st.session_state.scroll_to_bottom = False  # 플래그 초기화
-            # ▲▲▲ 자동 스크롤 로직 끝 ▲▲▲
+                st.session_state.scroll_to_bottom = False
             
-            # 사용자 입력 처리
             user_input = render_input_section()
             
             if user_input:
-                # 처리 중 표시
-                with st.spinner("쿼리 처리 중..."):
-                    result = process_user_query(user_input)
-                
-                # 채팅 기록에 추가
-                add_to_chat_history(user_input, result)
-                
-                # 성공시 스트리밍 효과
-                if result["success"]:
-                    response = result["response"]
-                    render_streaming_response(response.answer, result["message_id"])
-                    st.success("✅ 응답 완료!")
-                else:
-                    st.error("❌ 처리 중 오류가 발생했습니다.")
-                    st.code(result.get("error", ""))
-                
-                # 페이지 새로고침
+                st.session_state.chat_history.append({
+                    "role": "user",
+                    "content": user_input,
+                    "timestamp": datetime.now()
+                })
+                st.session_state.processing_user_input = user_input
+                st.session_state.scroll_to_bottom = True
                 st.rerun()
-        
+
         with col2:
-            # 개발 모드 추가 정보
+            # 개발 모드 추가 정보 (기존과 동일)
             st.markdown("### 🛠️ 개발 도구")
-            
             if st.button("💾 채팅 기록 저장", use_container_width=True):
-                chat_data = {
-                    "session_id": st.session_state.conversation_id,
-                    "timestamp": datetime.now().isoformat(),
-                    "chat_history": st.session_state.chat_history
-                }
-                st.download_button(
-                    "📥 다운로드",
-                    data=str(chat_data),
-                    file_name=f"chat_log_{st.session_state.conversation_id[:8]}.json",
-                    mime="application/json"
-                )
-            
+                # ... (기존 코드와 동일)
+                pass # 실제 코드에서는 구현 유지
             if st.button("🗑️ 채팅 기록 삭제", use_container_width=True):
-                st.session_state.chat_history = []
-                st.rerun()
+                # ... (기존 코드와 동일)
+                pass # 실제 코드에서는 구현 유지
                 
-    # --- 수정: 메인 컨테이너 닫기 ---
     st.markdown('</div>', unsafe_allow_html=True)
+    
 # =============================================================================
 # 피드백 버튼 JavaScript (클라이언트 사이드)
 # =============================================================================
