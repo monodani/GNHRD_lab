@@ -205,7 +205,7 @@ class AppConfig:
         "subject_satisfaction": {"csv_path": "data/satisfaction/subject_satisfaction.csv"},
         "cyber": {"csv_path": "data/cyber/cyber.csv"},
         "schedule": {"csv_path": "data/schedule/schedule.csv"},
-        "notice": {"search_type": "similarity"},
+        "general": {"search_type": "similarity"},
         "notice": {
             "k": 8,                     # 공지사항은 더 많이 검색하도록 기본값(3)을 오버라이드
             # "search_type": "similarity" # <--- 특정 핸들러만 오버라이드 가능
