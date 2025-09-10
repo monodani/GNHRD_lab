@@ -195,6 +195,13 @@ def load_custom_css():
         padding: 1rem 0 0 0;
     }
 
+    /* --- ▼▼▼ Streamlit 버튼 줄바꿈 방지 ▼▼▼ --- */
+    /* Streamlit의 기본 버튼 스타일을 대상으로 지정합니다. */
+    .stButton > button {
+        white-space: nowrap;
+    }
+
+
     /* --- ▼▼▼ [통합 및 수정] 반응형 디자인 ▼▼▼ --- */
     /* 모든 모바일 관련 CSS 규칙을 이 하나의 @media 블록 안에 넣습니다. */
     @media (max-width: 768px) {
