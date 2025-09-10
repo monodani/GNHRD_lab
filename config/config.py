@@ -142,43 +142,43 @@ class AppConfig:
         "course_satisfaction": {
             "type": "pandas", 
             "class": "CourseSatisfactionHandler",
-            "description": "교육과정 운영현황 및 만족도 통계, 종합 평가 분석 정보"
+            "description": "특정 교육 과정의 '전반 만족도', '역량 향상도', '현업 적용도' 등 '평가 점수'나 '순위'를 조회하거나, 여러 과정의 만족도를 '비교 분석'하는 통계 정보 전문 핸들러"
         },
         "subject_satisfaction": {
             "type": "pandas", 
             "class": "SubjectSatisfactionHandler",
-            "description": "교과목 운영현황 및 강의 만족도 통계, 강의 평가 분석 정보"
+            "description": "특정 '교과목'이나 '강의'의 '강의 만족도 점수'나 '순위'를 조회하거나, 여러 교과목의 만족도를 '비교 분석'하는 통계 정보 전문 핸들러"
         }, 
         "cyber": {
             "type": "pandas", 
             "class": "CyberHandler",
-            "description": "사이버교육, 온라인 과정, 이러닝 관련 정보"
+            "description": "'사이버 교육', '온라인 과정', '이러닝'의 종류, '학습 인정 시간', 자격증 과정(토익, 공인중개사 등) 목록 등 온라인 교육 과정에 대한 정보 전문 핸들러"
         },
         "schedule": {
             "type": "pandas", 
             "class": "ScheduleHandler",
-            "description": "교육일정, 스케줄, 기간 관련 정보"
+            "description": "특정 교육 과정의 '교육 시작일', '교육 종료일', '교육 기간', '교육 주차', '참여 인원' 등 '전체 연간 교육 일정'에 대한 정보 전문 핸들러"
         },
         # FAISS Vectorstore Handlers
         "general": {
             "type": "faiss", 
             "class": "GeneralHandler",
-            "description": "학칙, 규정, 연락처, 일반 정보, 교육과정별 커리큘럼 정보"
+            "description": "'신규임용자 과정'이나 '중견리더 과정' 등 특정 교육 과정의 '상세 평가 계획', '평가 항목별 배점', 과제 기준, 수료 요건, 가감점 규정 등 교육 운영의 구체적인 '규칙'에 대한 정보 전문 핸들러. 또한, 인재개발원 전체에 적용되는 '교육훈련 학칙' 전문, '도서관 이용 규정', '근태 관리', '결재 규정(사무전결)' 및 부서별 '담당자 연락처' 정보를 포함함."
         },
         "publish": {
             "type": "faiss", 
             "class": "PublishHandler",
-            "description": "발행물, 계획서, 평가서, 공식 자료"
+            "description": "기관의 공식 발행물인 '연간 교육훈련 계획'이나 '교육훈련 종합평가서'와 같이 특정 '보고서'나 '계획서' 전체의 상세 내용을 조회하거나 요약할 때 사용되는 전문 핸들러. 연도별 교육 성과, 통계, 세부 추진계획 등 심층적인 내용 포함."
         },
         "notice": {
             "type": "faiss", 
             "class": "NoticeHandler",
-            "description": "공지사항, 경남인재개발원 위치 및 시설(도서관, 숙소동/생활동 포함) 현황정보 및 전반 소개, 역대 원장 현황정보, 원장님 인사말, 벼리 소개, 금주 교육일정 및 교육과정 안내"
+            "description": "인재개발원의 '소개', '위치/찾아오는 길', '시설(강의실, 도서관, 숙소 등)' 현황, '원장 인사말', '연혁', 홍보 캐릭터 '벼리' 등 기관 자체에 대한 일반적인 정보와 '금주의 교육과정', 최신 '공지사항' 등 시의성 있는 정보를 안내하는 핸들러."
         },
         "menu": {
             "type": "faiss", 
             "class": "MenuHandler",
-            "description": "구내식당, 메뉴, 식단표 관련 정보"
+            "description": "구내식당의 '오늘의 메뉴'나 '주간 식단표'를 알려주는 식사 정보 전문 핸들러. '아침', '점심', '저녁' 메뉴 질문에 특화되어 있음."
         }
     })
 
