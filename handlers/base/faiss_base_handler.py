@@ -48,45 +48,78 @@ class BaseFaissHandler:
         self.domain_name = domain_name
         self.search_k = handler_settings.get('k', common_settings['default_k'])
         
+        # 🔥 [핵심 추가] 설정 파일에서 검색 타입(mmr or similarity)을 읽어옵니다.
+        self.search_type = handler_settings.get('search_type', common_settings.get('search_type', 'similarity'))
+        
         # =============================================================================
         # ⚙️ 2. 내부 변수 및 IndexManager 초기화
         # =============================================================================
         self.index_manager = get_index_manager()
         
-        logger.info(f"✅ {self.__class__.__name__} v1.0 초기화 완료 (도메인: {self.domain_name}, K={self.search_k})")
+        logger.info(f"✅ {self.__class__.__name__} v1.0 초기화 완료 (도메인: {self.domain_name}, K={self.search_k}, 검색타입: {self.search_type})")
+
+# handlers/base/faiss_base_handler.py
 
     def search_chunks(self, query: str) -> List[ChunkResult]:
         """
         🎯 CentralOrchestrator와 연동되는 메인 실행 메서드.
-        Vectorstore 로드 -> 유사도 검색 -> ChunkResult 변환의 흐름을 따릅니다.
+        (수정) 설정된 search_type에 따라 MMR 또는 유사도 검색을 동적으로 수행합니다.
         """
         try:
-            # 1. IndexManager로부터 해당 도메인의 벡터 저장소(FAISS)를 가져옴
+            # 1. IndexManager로부터 벡터 저장소를 가져옵니다. (변경 없음)
             vectorstore = self.index_manager.get_vectorstore(self.domain_name)
             if not vectorstore:
                 logger.warning(f"⚠️ {self.domain_name} 벡터스토어를 사용할 수 없습니다.")
                 return []
-            
-            # 2. 🔥 핵심 알고리즘: FAISS 유사도 검색 실행 (거리 점수 포함)
-            docs_with_scores = vectorstore.similarity_search_with_score(
-                query, k=self.search_k
-            )
-            
-            # 3. ✅ 검색 결과를 표준화된 ChunkResult 객체 리스트로 변환
+
             chunk_results = []
-            for i, (doc, distance) in enumerate(docs_with_scores):
-                # '거리(distance)'를 '신뢰도(confidence)' 점수로 변환 (0~1)
-                confidence = self.confidence_function(distance)
+
+            # =========================================================================
+            # 🔥 핵심 변경: self.search_type 값에 따라 분기 처리
+            # =========================================================================
+
+            if self.search_type == "mmr":
+                # --- 2-A. MMR 검색 로직 ---
+                logger.debug(f"Executing MMR search for domain '{self.domain_name}' with k={self.search_k}")
+                retriever = vectorstore.as_retriever(
+                    search_type="mmr",
+                    search_kwargs={'k': self.search_k}
+                )
+                docs = retriever.invoke(query)
                 
-                chunk_results.append(ChunkResult(
-                    chunk=TextChunk(content=doc.page_content, metadata=doc.metadata),
-                    confidence=confidence,
-                    domain=self.domain_name,
-                    metadata={"rank": i + 1, "raw_distance": distance}
-                ))
-            
+                # --- 3-A. MMR 결과 변환 (순위 기반 신뢰도) ---
+                for i, doc in enumerate(docs):
+                    # MMR은 거리 점수를 반환하지 않으므로, 순위에 따라 신뢰도를 계산합니다.
+                    # 예: 1위=1.0, 2위=0.95, 3위=0.9 ...
+                    confidence = max(0, 1.0 - (i * 0.05))
+
+                    chunk_results.append(ChunkResult(
+                        chunk=TextChunk(content=doc.page_content, metadata=doc.metadata),
+                        confidence=confidence,
+                        domain=self.domain_name,
+                        metadata={"rank": i + 1} # raw_distance는 없으므로 제거
+                    ))
+
+            else: # 기본값 또는 'similarity'로 설정된 경우
+                # --- 2-B. 기존 유사도 검색 로직 ---
+                logger.debug(f"Executing similarity search for domain '{self.domain_name}' with k={self.search_k}")
+                docs_with_scores = vectorstore.similarity_search_with_score(
+                    query, k=self.search_k
+                )
+                
+                # --- 3-B. 유사도 검색 결과 변환 (거리 기반 신뢰도) ---
+                for i, (doc, distance) in enumerate(docs_with_scores):
+                    confidence = self.confidence_function(distance)
+                    
+                    chunk_results.append(ChunkResult(
+                        chunk=TextChunk(content=doc.page_content, metadata=doc.metadata),
+                        confidence=confidence,
+                        domain=self.domain_name,
+                        metadata={"rank": i + 1, "raw_distance": distance}
+                    ))
+
             return chunk_results
-            
+
         except Exception as e:
             logger.error(f"❌ {self.domain_name} 검색 실패: {e}")
-            return [] # 실패 시 빈 리스트 반환
+            return []
