@@ -100,7 +100,7 @@ class AppConfig:
     # =============================================================================
     
     OPENAI_API_KEY: Optional[str] = field(default_factory=get_openai_api_key)
-    OPENAI_MODEL: str = "gpt-5-mini"
+    OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_TIMEOUT: float = 10.0
     OPENAI_MAX_RETRIES: int = 3
     
@@ -189,7 +189,7 @@ class AppConfig:
     HANDLER_SETTINGS: Dict[str, Any] = field(default_factory=lambda: {
         # 핸들러 타입별 공통 설정
         "pandas_agent": {
-            "llm_model": "gpt-5-mini",
+            "llm_model": "gpt-4o-mini",
             "llm_temperature": 0.1,
             "cache_ttl_seconds": 3600,
             "confidence_score": 0.9,  # 직접 답변이므로 높은 신뢰도 부여      
